@@ -111,9 +111,18 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
         .split(inner_area);
 
     // Album Art
-    if let Some(art) = &app.current_album_art {
-        let image = ratatui_image::Image::new(art);
-        f.render_widget(image, chunks[0]);
+    if let Some(img) = &app.current_album_art {
+        let area = chunks[0];
+        if app.current_protocol.is_none() || app.last_area != Some(area) {
+            let size = ratatui::layout::Size::new(area.width, area.height);
+            app.current_protocol = app.picker.new_protocol(img.clone(), size, ratatui_image::Resize::Fit(Some(image::imageops::FilterType::CatmullRom))).ok();
+            app.last_area = Some(area);
+        }
+        
+        if let Some(art) = &app.current_protocol {
+            let image = ratatui_image::Image::new(art);
+            f.render_widget(image, area);
+        }
     }
 
     // Meta & Progress

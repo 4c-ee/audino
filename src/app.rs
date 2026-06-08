@@ -16,7 +16,9 @@ pub struct App {
     pub player: Player,
     pub metadata: MetadataProvider,
     pub picker: Picker,
-    pub current_album_art: Option<Protocol>,
+    pub current_album_art: Option<image::DynamicImage>,
+    pub current_protocol: Option<Protocol>,
+    pub last_area: Option<ratatui::layout::Rect>,
     pub lyrics: Vec<LyricLine>,
     pub running: bool,
     pub library_path: PathBuf,
@@ -26,15 +28,24 @@ pub struct App {
     pub selected_folder_index: usize,
     pub focus: Focus,
     pub selected_queue_index: usize,
+    placeholder_img: image::DynamicImage,
 }
 
 impl App {
     pub fn new(library_path: PathBuf) -> Self {
+        let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+        
+        let placeholder_bytes = include_bytes!("../placeholder.png");
+        let placeholder_img = image::load_from_memory(placeholder_bytes)
+            .expect("Failed to load embedded placeholder.png");
+
         let mut app = Self {
             player: Player::new(),
             metadata: MetadataProvider::new(),
-            picker: Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()),
+            picker,
             current_album_art: None,
+            current_protocol: None,
+            last_area: None,
             lyrics: Vec::new(),
             running: true,
             library_path: library_path.clone(),
@@ -44,6 +55,7 @@ impl App {
             selected_folder_index: 0,
             focus: Focus::Tree,
             selected_queue_index: 0,
+            placeholder_img,
         };
         app.update_folder_items();
         app
@@ -143,16 +155,26 @@ impl App {
 
     fn load_track_assets(&mut self, path: &PathBuf) {
         // Load album art
+        let mut art_img = None;
+
+        // 1. Try embedded art
         if let Ok(Some(art_path)) = self.metadata.get_or_extract_album_art(path) {
-            if let Ok(img) = image::ImageReader::open(art_path).map_err(|e| e.to_string()).and_then(|r| r.decode().map_err(|e| e.to_string())) {
-                let size = ratatui::layout::Size::new(40, 20); // Larger default for better resolution
-                if let Ok(protocol) = self.picker.new_protocol(img, size, ratatui_image::Resize::Fit(None)) {
-                    self.current_album_art = Some(protocol);
+            art_img = self.load_image(&art_path);
+        }
+
+        // 2. Try cover.png in the same folder
+        if art_img.is_none() {
+            if let Some(parent) = path.parent() {
+                let cover_path = parent.join("cover.png");
+                if cover_path.exists() {
+                    art_img = self.load_image(&cover_path);
                 }
             }
-        } else {
-            self.current_album_art = None;
         }
+
+        // 3. Fallback to embedded placeholder
+        self.current_album_art = Some(art_img.unwrap_or_else(|| self.placeholder_img.clone()));
+        self.current_protocol = None;
 
         // Load lyrics
         if let Some(lrc_path) = lyrics::find_lrc_file(path) {
@@ -160,6 +182,13 @@ impl App {
         } else {
             self.lyrics = Vec::new();
         }
+    }
+
+    fn load_image(&self, path: &PathBuf) -> Option<image::DynamicImage> {
+        image::ImageReader::open(path)
+            .ok()
+            .and_then(|r| r.with_guessed_format().ok())
+            .and_then(|r| r.decode().ok())
     }
 
     pub fn play_selected_tree(&mut self) {
