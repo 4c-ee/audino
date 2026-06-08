@@ -162,12 +162,17 @@ impl App {
             art_img = self.load_image(&art_path);
         }
 
-        // 2. Try cover.png in the same folder
+        // 2. Try external cover files in the same folder
         if art_img.is_none() {
             if let Some(parent) = path.parent() {
-                let cover_path = parent.join("cover.png");
-                if cover_path.exists() {
-                    art_img = self.load_image(&cover_path);
+                for ext in &["png", "jpg", "webp"] {
+                    let cover_path = parent.join(format!("cover.{}", ext));
+                    if cover_path.exists() {
+                        art_img = self.load_image(&cover_path);
+                        if art_img.is_some() {
+                            break;
+                        }
+                    }
                 }
             }
         }

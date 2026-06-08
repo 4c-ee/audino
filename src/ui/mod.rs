@@ -1,6 +1,6 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     Frame,
@@ -131,6 +131,45 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let progress = if dur > 0.0 { pos / dur } else { 0.0 };
     let vol = app.player.get_volume().unwrap_or(100.0);
 
+    let max_visible_lyric_width = if !app.lyrics.is_empty() {
+        let current_time = pos;
+        let active_index = app.lyrics.iter().position(|l| l.time > current_time)
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or(app.lyrics.len().saturating_sub(1));
+        let visible_range = (active_index.saturating_sub(2))..=(active_index + 2);
+        app.lyrics.iter()
+            .enumerate()
+            .filter(|(i, _)| visible_range.contains(i))
+            .map(|(_, l)| unicode_width::UnicodeWidthStr::width(l.text.as_str()))
+            .max()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let min_progress_bar_chars: u16 = 25;
+    let min_lyric_chars: usize = 30;
+    let lyric_width = max_visible_lyric_width.max(min_lyric_chars);
+
+    let available_after_album = if inner_area.width > 20 { inner_area.width - 20 } else { 0 };
+    let max_lyric_pct = if available_after_album > min_progress_bar_chars {
+        ((available_after_album - min_progress_bar_chars) as f64 / inner_area.width as f64 * 100.0) as u16
+    } else {
+        30
+    };
+    let lyric_pct = ((lyric_width as f64 / inner_area.width as f64 * 100.0).ceil() as u16)
+        .max(30)
+        .min(max_lyric_pct.max(30));
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(20),
+            Constraint::Min(0),
+            Constraint::Percentage(lyric_pct),
+        ])
+        .split(inner_area);
+
     let current_track_path = app.current_index.and_then(|i| app.queue.get(i));
     let (title, artist, album) = if let Some(path) = current_track_path {
         let meta = app.metadata.get_metadata(path).ok();
@@ -201,5 +240,8 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
         vec![Line::from("No lyrics found").alignment(ratatui::layout::Alignment::Center)]
     };
 
-    f.render_widget(Paragraph::new(lyric_lines), chunks[2]);
+    let lyric_paragraph = Paragraph::new(lyric_lines)
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Center);
+    f.render_widget(lyric_paragraph, chunks[2]);
 }
