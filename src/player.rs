@@ -1,43 +1,27 @@
-use rodio::{Decoder, DeviceSinkBuilder, Player as RodioPlayer, MixerDeviceSink, Source};
+use libmpv2::Mpv;
 use anyhow::Result;
-use std::fs::File;
-use std::io::BufReader;
-use std::time::Duration;
 
 pub struct Player {
-    rodio_player: RodioPlayer,
-    _sink: MixerDeviceSink,
-    current_duration: f64,
+    mpv: Mpv,
 }
 
 impl Player {
     pub fn new() -> Self {
-        crate::log("Initializing Player with Rodio 0.22");
-        let sink = DeviceSinkBuilder::open_default_sink()
-            .expect("Failed to open default Rodio sink");
-        let (rodio_player, output) = RodioPlayer::new();
-        sink.mixer().add(output);
+        crate::log("Initializing Player with libmpv");
+        let mpv = Mpv::new().expect("Failed to initialize mpv");
         
-        Self {
-            rodio_player,
-            _sink: sink,
-            current_duration: 0.0,
-        }
+        // Suppress cover art display as requested
+        mpv.set_property("vo", "null").expect("Failed to set vo=null");
+        
+        Self { mpv }
     }
 
     pub fn play(&mut self, path: &str) -> Result<()> {
         crate::log(&format!("Player: Loading file: {}", path));
         
-        let file = BufReader::new(File::open(path)?);
-        let source = Decoder::new(file)?;
-        
-        self.current_duration = source.total_duration()
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
-            
-        self.rodio_player.stop(); // Clear previous
-        self.rodio_player.append(source);
-        self.rodio_player.play();
+        // "replace" will stop current playback and play the new file
+        self.mpv.command("loadfile", &[path, "replace"])
+            .map_err(|e| anyhow::anyhow!("mpv loadfile error: {}", e))?;
         
         crate::log("Player: Successfully started playback");
         Ok(())
@@ -45,50 +29,46 @@ impl Player {
 
     pub fn pause(&self, state: bool) -> Result<()> {
         crate::log(&format!("Player: Setting pause to {}", state));
-        if state {
-            self.rodio_player.pause();
-        } else {
-            self.rodio_player.play();
-        }
+        self.mpv.set_property("pause", state)
+            .map_err(|e| anyhow::anyhow!("mpv set_property pause error: {}", e))?;
         Ok(())
     }
 
     pub fn get_paused(&self) -> Result<bool> {
-        Ok(self.rodio_player.is_paused())
+        self.mpv.get_property::<bool>("pause")
+            .map_err(|e| anyhow::anyhow!("mpv get_property pause error: {}", e))
     }
 
     pub fn get_position(&self) -> Result<f64> {
-        Ok(self.rodio_player.get_pos().as_secs_f64())
+        // time-pos might be unavailable if nothing is playing
+        Ok(self.mpv.get_property::<f64>("time-pos").unwrap_or(0.0))
     }
 
     pub fn get_duration(&self) -> Result<f64> {
-        Ok(self.current_duration)
+        // duration might be unavailable if nothing is playing
+        Ok(self.mpv.get_property::<f64>("duration").unwrap_or(0.0))
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rodio_player.empty()
+        // idle-active is true when mpv has nothing to play and is idling
+        self.mpv.get_property::<bool>("idle-active").unwrap_or(true)
     }
 
     pub fn seek(&self, seconds: f64) -> Result<()> {
-        let current_pos = self.rodio_player.get_pos();
-        let new_pos = if seconds >= 0.0 {
-            current_pos + Duration::from_secs_f64(seconds)
-        } else {
-            current_pos.saturating_sub(Duration::from_secs_f64(-seconds))
-        };
-        
-        if let Err(e) = self.rodio_player.try_seek(new_pos) {
-            crate::log(&format!("Player: Seek failed: {:?}", e));
-        }
+        let seek_val = format!("{}", seconds);
+        self.mpv.command("seek", &[&seek_val, "relative"])
+            .map_err(|e| anyhow::anyhow!("mpv seek error: {}", e))?;
         Ok(())
     }
 
     pub fn set_volume(&self, volume: f64) -> Result<()> {
-        self.rodio_player.set_volume(volume as f32 / 100.0);
+        self.mpv.set_property("volume", volume)
+            .map_err(|e| anyhow::anyhow!("mpv set_property volume error: {}", e))?;
         Ok(())
     }
 
     pub fn get_volume(&self) -> Result<f64> {
-        Ok(self.rodio_player.volume() as f64 * 100.0)
+        self.mpv.get_property::<f64>("volume")
+            .map_err(|e| anyhow::anyhow!("mpv get_property volume error: {}", e))
     }
 }

@@ -8,7 +8,7 @@ anyhow = "1.0.102"
 crossterm = "0.29.0"
 ffmpeg-next = "8.1.0"
 image = "0.25.10"
-rodio = "0.22.2"
+libmpv2 = "6.0.0"
 ratatui = "0.30.1"
 ratatui-image = { version = "11.0.4", default-features = false, features = ["crossterm", "image-defaults"] }
 serde = { version = "1.0.228", features = ["derive"] }
