@@ -1,0 +1,10 @@
+1. Image rendering (at least on Kitty) is nonfunctional (no images loaded), though image fetching is functioning
+2. Opus file metadata isn't being correctly fetched/read (other types (flac, mp3, etc.) work well)
+3. Lyrics cut off horizontally (should word wrap)
+4. Ability to go beyond 100% volume? (add gain)
+5. Time should have trailing zeros (1:0 becomes 1:00)
+6. Time accidentally shows 1:60 instead of 2:00, then breaks and resets to 1:00 just to be sent back to the correct 2:30 after 30 secs. Happens on 2 mins and presumably others too
+7. Time is incorrectly read? reads 3:00 instead of correctly 4:00. might be an additional symptom of #6
+8. Should be able to remove tracks from queue
+9. Queue should scroll
+10. Queue should show metadata too (track #, artist, album, title)

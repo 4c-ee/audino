@@ -1,0 +1,88 @@
+UI Design Specification: "TUI-Minimalist" Music Player
+
+
+1. Design Philosophy 
+Aesthetic: Ultra-minimalist, retro-terminal, Text User Interface (TUI) inspired. 
+Core Principles: High contrast, zero-bloat, strict layout geometry, keyboard-driven feel, and absolute elimination of gradients, shadows, and rounded corners (except where raw pixel-art assets require it).
+
+
+2. Color Palette
+Element
+Hex Code
+Usage
+
+Canvas Background
+#000000
+Pure black background for maximum contrast.
+
+Primary Text / Active Borders
+#c5c5c5
+Current track titles, active lyric line, active panel outlines.
+
+Muted Text / Inactive Borders
+#888888
+Metadata (artist/album), inactive lyrics, inactive panel outlines.
+
+Dark Muted / Progress Track
+#333333
+Background of the progress bar, deep-nested UI text.
+
+
+3. Typography 
+Font Family: Monospaced with high readability (e.g., JetBrains Mono, Fira Code, or Source Code Pro).
+Sizing & Hierarchy:
+Headers / Panel Titles: 10px Regular.
+Body / Meta Text: 12px Regular.
+Active Highlight (Lyrics/Track): 14px Semi-Bold.
+Faded Highlight (Lyrics): 12px Regular 
+
+
+
+4. Layout & Grid System
+The interface uses a flush, border-divided grid layout. All dividers are 1px solid lines.
+
+
+Folder Tree Panel
+Queue / Track List Panel
+(Width: 25% - 30%)
+(Width: 70% - 75%)
+
+Border Style: 1px solid #FFFFFF (or #888888 for inactive focus). 
+Header Style: All border (header) titles are indented into the border with gaps beside it. Like ┌─── user ───┐
+
+
+5. Component Specifications
+
+
+A. Left Panel: Folder Tree 
+Behavior: File-system navigation starting from a user-defined music directory.
+Style: Text-only directory tree using indentation (e.g., 2 spaces per subfolder) and simple prefix symbols (e.g., + / - or ▸ / ▾).
+
+
+B. Right Panel: Queue / Current Playlist 
+Content: Displays the current playlist queue, highlighting the currently playing track.
+Layout: Tabular monospaced text columns (e.g., Title | Artist | Album | Track#).
+
+
+C. Bottom Player Bar (Height: ~120px)
+Divided into three distinct functional zones:
+
+1. Left Zone: Album Art & Track Meta
+Album Art: Strict square (e.g., 80px x 80px), no border-radius.
+Metadata: 
+Track Title (#c5c5c5, bold)
+Artist Name (#888888)
+Track Number & Album name (as "# - ALBUM") (#888888)
+
+2. Center-Left Zone: Playback Controls & Progress
+Progress Bar: 
+Height: 8px
+Active/Played Fill: #888888
+Inactive Track: #333333
+No thumb/scrubber handle.
+Time & Play State: Centered below the progress bar (e.g., 1:26/3:37 ⏸).
+
+3. Right Zone: Synchronized Lyrics
+Aesthetic: Clean, vertically scrolling karaoke style.
+Active Line: Centered, #c5c5c5, larger font size (14px).
+Surrounding Lines (Context): 2 lines above and 2 lines below, centered, highly faded (#444444), smaller font size (12px).
