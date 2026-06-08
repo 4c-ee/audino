@@ -23,13 +23,27 @@ pub fn extract_metadata(path: &Path) -> Result<TrackMetadata> {
     let mut track_number = None;
     let duration = Some(ictx.duration() as f64 / ffmpeg::ffi::AV_TIME_BASE as f64);
 
+    // Extract from global metadata
     for (k, v) in ictx.metadata().iter() {
         match k.to_lowercase().as_str() {
-            "title" => title = Some(v.to_string()),
-            "artist" => artist = Some(v.to_string()),
-            "album" => album = Some(v.to_string()),
-            "track" => track_number = Some(v.to_string()),
+            "title" if title.is_none() => title = Some(v.to_string()),
+            "artist" if artist.is_none() => artist = Some(v.to_string()),
+            "album" if album.is_none() => album = Some(v.to_string()),
+            "track" | "tracknumber" if track_number.is_none() => track_number = Some(v.to_string()),
             _ => {}
+        }
+    }
+
+    // Extract from stream metadata if missing
+    for stream in ictx.streams() {
+        for (k, v) in stream.metadata().iter() {
+            match k.to_lowercase().as_str() {
+                "title" if title.is_none() => title = Some(v.to_string()),
+                "artist" if artist.is_none() => artist = Some(v.to_string()),
+                "album" if album.is_none() => album = Some(v.to_string()),
+                "track" | "tracknumber" if track_number.is_none() => track_number = Some(v.to_string()),
+                _ => {}
+            }
         }
     }
 
