@@ -1,4 +1,4 @@
-<div><img src="full.png" style="max-width:120px"><h6>please don't sue me game freak</h6><h2>A TUI music player that does music player things.</h2></div>
+<div><img src="assets/full.png" style="max-width:120px"><h6>please don't sue me game freak</h6><h2>A TUI music player that does music player things.</h2></div>
 
 a "lightweight" "simple" "easy-to-use" "TUI" (sorry i gotta get my keywords in) music player that does such revolutionary things as:
 1. Play music
@@ -12,7 +12,7 @@ Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI musi
 - Queue, for managing the next and previously played songs. Comes with an extra not-really-panel for shuffle/clear/sort.
 - Player, which shows cover art, metadata, progress, and lyrics if applicable.
 
-<img src="preview.png">
+<img src="assets/preview.png">
 
 ---
 # DISCLAIMER
