@@ -1,10 +1,15 @@
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 use crate::player::Player;
 use crate::metadata::MetadataProvider;
 use crate::lyrics::{self, LyricLine};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
 use ratatui::widgets::ListState;
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
+};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Focus {
@@ -55,6 +60,8 @@ pub struct App {
     pub is_searching: bool,
     pub search_query: String,
     placeholder_img: image::DynamicImage,
+    pub controls: Option<MediaControls>,
+    pub mpris_rx: Receiver<MediaControlEvent>,
 }
 
 impl App {
@@ -64,6 +71,20 @@ impl App {
         let placeholder_bytes = include_bytes!("../placeholder.png");
         let placeholder_img = image::load_from_memory(placeholder_bytes)
             .expect("Failed to load embedded placeholder.png");
+
+        let (mpris_tx, mpris_rx) = mpsc::channel();
+        let config = PlatformConfig {
+            dbus_name: "audino",
+            display_name: "audino",
+            hwnd: None,
+        };
+
+        let mut controls = MediaControls::new(config).ok();
+        if let Some(ref mut c) = controls {
+            c.attach(move |event| {
+                mpris_tx.send(event).ok();
+            }).ok();
+        }
 
         let mut app = Self {
             player: Player::new(),
@@ -91,6 +112,8 @@ impl App {
             is_searching: false,
             search_query: String::new(),
             placeholder_img,
+            controls,
+            mpris_rx,
         };
         app.update_folder_items();
         app.folder_tree_state.select(Some(0));
@@ -187,6 +210,7 @@ impl App {
             } else {
                 self.current_index = Some(index);
                 self.load_track_assets(&path);
+                self.update_mpris_metadata(&path);
             }
         } else {
             crate::log("App: Index not found in queue");
@@ -206,6 +230,7 @@ impl App {
                 }
             }
         }
+        self.update_mpris_playback();
     }
 
     fn load_track_assets(&mut self, path: &PathBuf) {
@@ -507,6 +532,99 @@ impl App {
         }) {
             self.selected_folder_index = index;
             self.folder_tree_state.select(Some(index));
+        }
+    }
+
+    pub fn update_mpris_metadata(&mut self, path: &PathBuf) {
+        if let Some(ref mut controls) = self.controls {
+            let meta = self.metadata.get_metadata(path).ok();
+            let duration = self.player.get_duration().ok().map(Duration::from_secs_f64);
+
+            let mut art_url = None;
+            if let Ok(Some(art_path)) = self.metadata.get_or_extract_album_art(path) {
+                if let Some(path_str) = art_path.to_str() {
+                    art_url = Some(format!("file://{}", path_str));
+                }
+            }
+
+            let mpris_meta = MediaMetadata {
+                title: meta.as_ref().and_then(|m| m.title.as_deref()),
+                artist: meta.as_ref().and_then(|m| m.artist.as_deref()),
+                album: meta.as_ref().and_then(|m| m.album.as_deref()),
+                duration,
+                cover_url: art_url.as_deref(),
+                ..Default::default()
+            };
+            controls.set_metadata(mpris_meta).ok();
+        }
+    }
+
+    pub fn update_mpris_playback(&mut self) {
+        if let Some(ref mut controls) = self.controls {
+            let position = self
+                .player
+                .get_position()
+                .ok()
+                .map(|p| MediaPosition(Duration::from_secs_f64(p)));
+
+            let status = if self.player.is_empty() {
+                MediaPlayback::Stopped
+            } else if self.player.get_paused().unwrap_or(false) {
+                MediaPlayback::Paused { progress: position }
+            } else {
+                MediaPlayback::Playing { progress: position }
+            };
+            controls.set_playback(status).ok();
+        }
+    }
+
+    pub fn handle_mpris_events(&mut self) {
+        while let Ok(event) = self.mpris_rx.try_recv() {
+            match event {
+                MediaControlEvent::Play => {
+                    self.player.pause(false).ok();
+                }
+                MediaControlEvent::Pause => {
+                    self.player.pause(true).ok();
+                }
+                MediaControlEvent::Toggle => {
+                    let paused = self.player.get_paused().unwrap_or(false);
+                    self.player.pause(!paused).ok();
+                }
+                MediaControlEvent::Next => {
+                    if let Some(current) = self.current_index {
+                        if current + 1 < self.queue.len() {
+                            self.play_index(current + 1);
+                        }
+                    }
+                }
+                MediaControlEvent::Previous => {
+                    if let Some(current) = self.current_index {
+                        if current > 0 {
+                            self.play_index(current - 1);
+                        }
+                    }
+                }
+                MediaControlEvent::Stop => {
+                    self.player.pause(true).ok();
+                }
+                MediaControlEvent::Seek(direction) => {
+                    let offset = match direction {
+                        souvlaki::SeekDirection::Forward => 5.0,
+                        souvlaki::SeekDirection::Backward => -5.0,
+                    };
+                    self.player.seek(offset).ok();
+                }
+                MediaControlEvent::SeekBy(direction, duration) => {
+                    let secs = duration.as_secs_f64();
+                    let offset = match direction {
+                        souvlaki::SeekDirection::Forward => secs,
+                        souvlaki::SeekDirection::Backward => -secs,
+                    };
+                    self.player.seek(offset).ok();
+                }
+                _ => {}
+            }
         }
     }
 }

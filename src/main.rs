@@ -79,6 +79,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
 {
     let mut last_tick = Instant::now();
     while app.running {
+        app.handle_mpris_events();
         terminal.draw(|f| {
             ui::render(f, app);
         })?;
