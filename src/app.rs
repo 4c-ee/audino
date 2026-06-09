@@ -10,7 +10,23 @@ use ratatui::widgets::ListState;
 pub enum Focus {
     Tree,
     Queue,
+    QueueControls,
     Player,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum SortMethod {
+    Track,
+    Artist,
+    Album,
+    Title,
+    Added,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct QueueItem {
+    pub path: PathBuf,
+    pub id: usize, // Original addition order
 }
 
 pub struct App {
@@ -23,13 +39,17 @@ pub struct App {
     pub lyrics: Vec<LyricLine>,
     pub running: bool,
     pub library_path: PathBuf,
-    pub queue: Vec<PathBuf>,
+    pub queue: Vec<QueueItem>,
+    pub next_id: usize,
+    pub sort_method: SortMethod,
     pub current_index: Option<usize>,
     pub folder_items: Vec<PathBuf>,
     pub selected_folder_index: usize,
     pub folder_tree_state: ListState,
     pub focus: Focus,
     pub selected_queue_index: usize,
+    pub is_moving_track: bool,
+    pub selected_control_index: usize,
     pub queue_state: ListState,
     pub show_hidden: bool,
     pub is_searching: bool,
@@ -56,12 +76,16 @@ impl App {
             running: true,
             library_path: library_path.clone(),
             queue: Vec::new(),
+            next_id: 0,
+            sort_method: SortMethod::Added,
             current_index: None,
             folder_items: Vec::new(),
             selected_folder_index: 0,
             folder_tree_state: ListState::default(),
             focus: Focus::Tree,
             selected_queue_index: 0,
+            is_moving_track: false,
+            selected_control_index: 0,
             queue_state: ListState::default(),
             show_hidden: false,
             is_searching: false,
@@ -76,7 +100,8 @@ impl App {
 
     pub fn add_to_queue(&mut self, path: PathBuf) {
         if path.is_file() {
-            self.queue.push(path);
+            self.queue.push(QueueItem { path, id: self.next_id });
+            self.next_id += 1;
         } else if path.is_dir() {
             let mut items = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&path) {
@@ -110,7 +135,8 @@ impl App {
             });
 
             for (_, p) in meta_items {
-                self.queue.push(p);
+                self.queue.push(QueueItem { path: p, id: self.next_id });
+                self.next_id += 1;
             }
         }
     }
@@ -154,7 +180,8 @@ impl App {
 
     pub fn play_index(&mut self, index: usize) {
         crate::log(&format!("App: Attempting to play index {}", index));
-        if let Some(path) = self.queue.get(index).cloned() {
+        if let Some(item) = self.queue.get(index) {
+            let path = item.path.clone();
             if let Err(e) = self.player.play(&path.to_string_lossy()) {
                 crate::log(&format!("App: Error playing file: {:?}", e));
             } else {
@@ -244,8 +271,22 @@ impl App {
             }
             Focus::Queue => {
                 if self.selected_queue_index > 0 {
+                    if self.is_moving_track {
+                        self.queue.swap(self.selected_queue_index, self.selected_queue_index - 1);
+                        // Update current_index if it was swapped
+                        if Some(self.selected_queue_index) == self.current_index {
+                            self.current_index = Some(self.selected_queue_index - 1);
+                        } else if Some(self.selected_queue_index - 1) == self.current_index {
+                            self.current_index = Some(self.selected_queue_index);
+                        }
+                    }
                     self.selected_queue_index -= 1;
                     self.queue_state.select(Some(self.selected_queue_index));
+                }
+            }
+            Focus::QueueControls => {
+                if self.selected_control_index > 0 {
+                    self.selected_control_index -= 1;
                 }
             }
             _ => {}
@@ -262,10 +303,152 @@ impl App {
             }
             Focus::Queue => {
                 if self.selected_queue_index < self.queue.len().saturating_sub(1) {
+                    if self.is_moving_track {
+                        self.queue.swap(self.selected_queue_index, self.selected_queue_index + 1);
+                        // Update current_index if it was swapped
+                        if Some(self.selected_queue_index) == self.current_index {
+                            self.current_index = Some(self.selected_queue_index + 1);
+                        } else if Some(self.selected_queue_index + 1) == self.current_index {
+                            self.current_index = Some(self.selected_queue_index);
+                        }
+                    }
                     self.selected_queue_index += 1;
                     self.queue_state.select(Some(self.selected_queue_index));
                 }
             }
+            Focus::QueueControls => {
+                if self.selected_control_index < 2 { // 0: Shuffle, 1: Clear, 2: Sort
+                    self.selected_control_index += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn remove_selected_queue_track(&mut self) {
+        if !self.queue.is_empty() && self.selected_queue_index < self.queue.len() {
+            self.queue.remove(self.selected_queue_index);
+            
+            // Adjust current_index
+            if let Some(curr) = self.current_index {
+                if curr == self.selected_queue_index {
+                    self.current_index = None;
+                    // Optionally stop playback or skip to next? 
+                    // Let's just leave it for now.
+                } else if curr > self.selected_queue_index {
+                    self.current_index = Some(curr - 1);
+                }
+            }
+
+            if self.selected_queue_index >= self.queue.len() && !self.queue.is_empty() {
+                self.selected_queue_index = self.queue.len() - 1;
+            }
+            self.queue_state.select(Some(self.selected_queue_index));
+        }
+    }
+
+    pub fn shuffle_queue(&mut self) {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        
+        if let Some(curr) = self.current_index {
+            if curr + 1 < self.queue.len() {
+                let (_, next_up) = self.queue.split_at_mut(curr + 1);
+                next_up.shuffle(&mut rng);
+            }
+        } else {
+            self.queue.shuffle(&mut rng);
+        }
+    }
+
+    pub fn clear_queue(&mut self) {
+        if let Some(curr) = self.current_index {
+            if let Some(item) = self.queue.get(curr).cloned() {
+                self.queue = vec![item];
+                self.current_index = Some(0);
+                self.selected_queue_index = 0;
+            }
+        } else {
+            self.queue.clear();
+            self.current_index = None;
+            self.selected_queue_index = 0;
+        }
+        self.queue_state.select(Some(self.selected_queue_index));
+    }
+
+    pub fn cycle_sort_method(&mut self) {
+        self.sort_method = match self.sort_method {
+            SortMethod::Added => SortMethod::Track,
+            SortMethod::Track => SortMethod::Artist,
+            SortMethod::Artist => SortMethod::Album,
+            SortMethod::Album => SortMethod::Title,
+            SortMethod::Title => SortMethod::Added,
+        };
+        self.apply_sort();
+    }
+
+    pub fn apply_sort(&mut self) {
+        let current_item = self.current_index.and_then(|i| self.queue.get(i).cloned());
+
+        self.queue.sort_by(|a, b| {
+            if self.sort_method == SortMethod::Added {
+                return a.id.cmp(&b.id);
+            }
+
+            let meta_a = self.metadata.get_metadata(&a.path).ok();
+            let meta_b = self.metadata.get_metadata(&b.path).ok();
+
+            let (val_a, val_b) = match self.sort_method {
+                SortMethod::Track => (
+                    meta_a.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_default(),
+                    meta_b.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_default()
+                ),
+                SortMethod::Artist => (
+                    meta_a.as_ref().and_then(|m| m.artist.clone()).unwrap_or_default().to_lowercase(),
+                    meta_b.as_ref().and_then(|m| m.artist.clone()).unwrap_or_default().to_lowercase()
+                ),
+                SortMethod::Album => (
+                    meta_a.as_ref().and_then(|m| m.album.clone()).unwrap_or_default().to_lowercase(),
+                    meta_b.as_ref().and_then(|m| m.album.clone()).unwrap_or_default().to_lowercase()
+                ),
+                SortMethod::Title => (
+                    meta_a.as_ref().and_then(|m| m.title.clone()).unwrap_or_default().to_lowercase(),
+                    meta_b.as_ref().and_then(|m| m.title.clone()).unwrap_or_default().to_lowercase()
+                ),
+                SortMethod::Added => unreachable!(),
+            };
+
+            match val_a.cmp(&val_b) {
+                std::cmp::Ordering::Equal => {
+                    // Fallback: track # > name
+                    let track_a = meta_a.as_ref().and_then(|m| m.track_number.as_ref())
+                        .and_then(|t| t.split('/').next()).and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
+                    let track_b = meta_b.as_ref().and_then(|m| m.track_number.as_ref())
+                        .and_then(|t| t.split('/').next()).and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
+                    
+                    match track_a.cmp(&track_b) {
+                        std::cmp::Ordering::Equal => {
+                            let name_a = a.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                            let name_b = b.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                            name_a.cmp(&name_b)
+                        }
+                        other => other,
+                    }
+                }
+                other => other,
+            }
+        });
+
+        if let Some(item) = current_item {
+            self.current_index = self.queue.iter().position(|it| it == &item);
+        }
+    }
+
+    pub fn execute_selected_control(&mut self) {
+        match self.selected_control_index {
+            0 => self.shuffle_queue(),
+            1 => self.clear_queue(),
+            2 => self.cycle_sort_method(),
             _ => {}
         }
     }
@@ -303,7 +486,8 @@ impl App {
     pub fn next_focus(&mut self) {
         self.focus = match self.focus {
             Focus::Tree => Focus::Queue,
-            Focus::Queue => Focus::Player,
+            Focus::Queue => Focus::QueueControls,
+            Focus::QueueControls => Focus::Player,
             Focus::Player => Focus::Tree,
         };
     }

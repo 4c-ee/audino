@@ -123,18 +123,31 @@ where B::Error: std::error::Error + Send + Sync + 'static
                     }
                     KeyCode::Tab => app.next_focus(),
                     KeyCode::Char(' ') => {
-                        let paused = app.player.get_paused().unwrap_or(false);
-                        app.player.pause(!paused).ok();
+                        match app.focus {
+                            Focus::Player => {
+                                let paused = app.player.get_paused().unwrap_or(false);
+                                app.player.pause(!paused).ok();
+                            }
+                            Focus::Queue => {
+                                app.is_moving_track = !app.is_moving_track;
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Backspace | KeyCode::Char('d') => {
+                        if app.focus == Focus::Queue {
+                            app.remove_selected_queue_track();
+                        }
                     }
                     KeyCode::Up => match app.focus {
-                        Focus::Tree | Focus::Queue => app.move_up(),
+                        Focus::Tree | Focus::Queue | Focus::QueueControls => app.move_up(),
                         Focus::Player => {
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol + 5.0).min(100.0)).ok();
                         }
                     },
                     KeyCode::Down => match app.focus {
-                        Focus::Tree | Focus::Queue => app.move_down(),
+                        Focus::Tree | Focus::Queue | Focus::QueueControls => app.move_down(),
                         Focus::Player => {
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol - 5.0).max(0.0)).ok();
@@ -145,6 +158,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
                         Focus::Player => {
                             app.player.seek(-5.0).ok();
                         }
+                        Focus::QueueControls => app.move_up(),
                         _ => {}
                     },
                     KeyCode::Right => match app.focus {
@@ -152,11 +166,13 @@ where B::Error: std::error::Error + Send + Sync + 'static
                         Focus::Player => {
                             app.player.seek(5.0).ok();
                         }
+                        Focus::QueueControls => app.move_down(),
                         _ => {}
                     },
                     KeyCode::Enter => match app.focus {
                         Focus::Tree => app.play_selected_tree(),
                         Focus::Queue => app.play_index(app.selected_queue_index),
+                        Focus::QueueControls => app.execute_selected_control(),
                         _ => {}
                     },
                     _ => {}

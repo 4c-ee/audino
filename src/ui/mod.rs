@@ -20,12 +20,21 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(30), // Folder tree
-            Constraint::Percentage(70), // Queue
+            Constraint::Percentage(70), // Queue + Controls
         ])
         .split(chunks[0]);
 
+    let queue_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(3), // Queue controls
+        ])
+        .split(main_chunks[1]);
+
     render_folder_tree(f, app, main_chunks[0]);
-    render_queue(f, app, main_chunks[1]);
+    render_queue(f, app, queue_chunks[0]);
+    render_queue_controls(f, app, queue_chunks[1]);
     render_player_bar(f, app, chunks[1]);
 }
 
@@ -66,8 +75,14 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app.queue.iter().enumerate().map(|(i, path)| {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let items: Vec<ListItem> = app.queue.iter().enumerate().map(|(i, item)| {
+        let path = &item.path;
+        let meta = app.metadata.get_metadata(path).ok();
+        let track_num = meta.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_else(|| "??".to_string());
+        let artist = meta.as_ref().and_then(|m| m.artist.clone()).unwrap_or_else(|| "Unknown Artist".to_string());
+        let album = meta.as_ref().and_then(|m| m.album.clone()).unwrap_or_else(|| "Unknown Album".to_string());
+        let title = meta.as_ref().and_then(|m| m.title.clone()).unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
+
         let mut style = if Some(i) == app.current_index {
             Style::default().fg(Color::Rgb(197, 197, 197)).add_modifier(Modifier::BOLD)
         } else if app.current_index.map_or(false, |curr| i < curr) {
@@ -77,10 +92,21 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         };
 
         if i == app.selected_queue_index && app.focus == Focus::Queue {
-            style = style.add_modifier(Modifier::REVERSED);
+            if app.is_moving_track {
+                style = Style::default().bg(Color::Rgb(50, 50, 50)).fg(Color::Rgb(255, 255, 255)).add_modifier(Modifier::BOLD);
+            } else {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
         }
 
-        ListItem::new(name.to_string()).style(style)
+        let line = Line::from(vec![
+            Span::styled(format!("{:>2} ", track_num), style),
+            Span::styled(format!("{:<20} ", artist), style),
+            Span::styled(format!("{:<20} ", album), style),
+            Span::styled(title, style),
+        ]);
+
+        ListItem::new(line)
     }).collect();
 
     let border_color = if app.focus == Focus::Queue {
@@ -89,8 +115,14 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         Color::Rgb(136, 136, 136)
     };
 
+    let title = if app.is_moving_track {
+        " Queue (Moving Track...) "
+    } else {
+        " Queue "
+    };
+
     let block = Block::default()
-        .title(" Queue ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
     
@@ -99,6 +131,47 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     
     f.render_stateful_widget(list, area, &mut app.queue_state);
+}
+
+fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect) {
+    let sort_label = format!(" Sort ({:?}) ", app.sort_method);
+    let controls = [" Shuffle ", " Clear ", &sort_label];
+    
+    let border_color = if app.focus == Focus::QueueControls {
+        Color::Rgb(197, 197, 197)
+    } else {
+        Color::Rgb(136, 136, 136)
+    };
+
+    let block = Block::default()
+        .title(" Queue Controls ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+    
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+        ])
+        .split(inner_area);
+
+    for (i, control) in controls.iter().enumerate() {
+        let style = if i == app.selected_control_index && app.focus == Focus::QueueControls {
+            Style::default().fg(Color::Rgb(197, 197, 197)).add_modifier(Modifier::BOLD).add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default().fg(Color::Rgb(136, 136, 136))
+        };
+        
+        let p = Paragraph::new(*control)
+            .style(style)
+            .alignment(Alignment::Center);
+        f.render_widget(p, chunks[i]);
+    }
 }
 
 fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -188,8 +261,9 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
         ])
         .split(inner_area);
 
-    let current_track_path = app.current_index.and_then(|i| app.queue.get(i));
-    let (title, artist, album) = if let Some(path) = current_track_path {
+    let current_track_item = app.current_index.and_then(|i| app.queue.get(i));
+    let (title, artist, album) = if let Some(item) = current_track_item {
+        let path = &item.path;
         let meta = app.metadata.get_metadata(path).ok();
         (
             meta.as_ref().and_then(|m| m.title.clone()).unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string()),
