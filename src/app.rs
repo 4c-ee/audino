@@ -87,7 +87,11 @@ impl App {
             }
             meta_items.sort_by(|a, b| {
                 match a.0.cmp(&b.0) {
-                    std::cmp::Ordering::Equal => a.1.file_name().cmp(&b.1.file_name()),
+                    std::cmp::Ordering::Equal => {
+                        let a_name = a.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                        let b_name = b.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                        a_name.cmp(&b_name)
+                    },
                     other => other,
                 }
             });
@@ -121,7 +125,11 @@ impl App {
                     .collect()
             })
             .unwrap_or_default();
-        self.folder_items.sort();
+        self.folder_items.sort_by(|a, b| {
+            let a_str = a.to_string_lossy().to_lowercase();
+            let b_str = b.to_string_lossy().to_lowercase();
+            a_str.cmp(&b_str)
+        });
     }
 
     pub fn play_index(&mut self, index: usize) {
