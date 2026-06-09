@@ -1,4 +1,4 @@
-<div style="align-items:center;"><img src="full.png" style="max-width:120px"><br><h2>TUI music player that does music player things.</h2></div>
+<div><img src="full.png" style="max-width:120px"><h6>please don't sue me game freak</h6><h2>A TUI music player that does music player things.</h2></div>
 
 a "lightweight" "simple" "easy-to-use" "TUI" (sorry i gotta get my keywords in) music player that does such revolutionary things as:
 1. Play music
