@@ -91,38 +91,26 @@ where B::Error: std::error::Error + Send + Sync + 'static
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') => app.quit(),
+                    KeyCode::Char('.') => {
+                        app.show_hidden = !app.show_hidden;
+                        app.update_folder_items();
+                        app.selected_folder_index = 0;
+                        app.folder_tree_state.select(Some(0));
+                    }
                     KeyCode::Tab => app.next_focus(),
                     KeyCode::Char(' ') => {
                         let paused = app.player.get_paused().unwrap_or(false);
                         app.player.pause(!paused).ok();
                     }
                     KeyCode::Up => match app.focus {
-                        Focus::Tree => {
-                            if app.selected_folder_index > 0 {
-                                app.selected_folder_index -= 1;
-                            }
-                        }
-                        Focus::Queue => {
-                            if app.selected_queue_index > 0 {
-                                app.selected_queue_index -= 1;
-                            }
-                        }
+                        Focus::Tree | Focus::Queue => app.move_up(),
                         Focus::Player => {
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol + 5.0).min(100.0)).ok();
                         }
                     },
                     KeyCode::Down => match app.focus {
-                        Focus::Tree => {
-                            if app.selected_folder_index < app.folder_items.len().saturating_sub(1) {
-                                app.selected_folder_index += 1;
-                            }
-                        }
-                        Focus::Queue => {
-                            if app.selected_queue_index < app.queue.len().saturating_sub(1) {
-                                app.selected_queue_index += 1;
-                            }
-                        }
+                        Focus::Tree | Focus::Queue => app.move_down(),
                         Focus::Player => {
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol - 5.0).max(0.0)).ok();

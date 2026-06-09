@@ -4,6 +4,7 @@ use crate::metadata::MetadataProvider;
 use crate::lyrics::{self, LyricLine};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
+use ratatui::widgets::ListState;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Focus {
@@ -26,8 +27,11 @@ pub struct App {
     pub current_index: Option<usize>,
     pub folder_items: Vec<PathBuf>,
     pub selected_folder_index: usize,
+    pub folder_tree_state: ListState,
     pub focus: Focus,
     pub selected_queue_index: usize,
+    pub queue_state: ListState,
+    pub show_hidden: bool,
     placeholder_img: image::DynamicImage,
 }
 
@@ -53,11 +57,16 @@ impl App {
             current_index: None,
             folder_items: Vec::new(),
             selected_folder_index: 0,
+            folder_tree_state: ListState::default(),
             focus: Focus::Tree,
             selected_queue_index: 0,
+            queue_state: ListState::default(),
+            show_hidden: false,
             placeholder_img,
         };
         app.update_folder_items();
+        app.folder_tree_state.select(Some(0));
+        app.queue_state.select(Some(0));
         app
     }
 
@@ -115,6 +124,13 @@ impl App {
                 rd.filter_map(|e| e.ok())
                     .map(|e| {
                         let p = e.path();
+                        if !self.show_hidden {
+                            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                                if name.starts_with('.') {
+                                    return None;
+                                }
+                            }
+                        }
                         if p.is_dir() || self.is_audio_file(&p) {
                             Some(p)
                         } else {
@@ -206,10 +222,47 @@ impl App {
 
     pub fn play_selected_tree(&mut self) {
         if let Some(path) = self.folder_items.get(self.selected_folder_index).cloned() {
+            let old_len = self.queue.len();
             self.add_to_queue(path);
-            if self.current_index.is_none() && !self.queue.is_empty() {
-                self.play_index(0);
+            if self.current_index.is_none() && self.queue.len() > old_len {
+                self.play_index(old_len);
             }
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        match self.focus {
+            Focus::Tree => {
+                if self.selected_folder_index > 0 {
+                    self.selected_folder_index -= 1;
+                    self.folder_tree_state.select(Some(self.selected_folder_index));
+                }
+            }
+            Focus::Queue => {
+                if self.selected_queue_index > 0 {
+                    self.selected_queue_index -= 1;
+                    self.queue_state.select(Some(self.selected_queue_index));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        match self.focus {
+            Focus::Tree => {
+                if self.selected_folder_index < self.folder_items.len().saturating_sub(1) {
+                    self.selected_folder_index += 1;
+                    self.folder_tree_state.select(Some(self.selected_folder_index));
+                }
+            }
+            Focus::Queue => {
+                if self.selected_queue_index < self.queue.len().saturating_sub(1) {
+                    self.selected_queue_index += 1;
+                    self.queue_state.select(Some(self.selected_queue_index));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -219,15 +272,23 @@ impl App {
                 self.library_path = path;
                 self.update_folder_items();
                 self.selected_folder_index = 0;
+                self.folder_tree_state.select(Some(0));
             }
         }
     }
 
     pub fn go_back(&mut self) {
+        let old_path = self.library_path.clone();
         if let Some(parent) = self.library_path.parent() {
             self.library_path = parent.to_path_buf();
             self.update_folder_items();
-            self.selected_folder_index = 0;
+            
+            if let Some(index) = self.folder_items.iter().position(|p| p == &old_path) {
+                self.selected_folder_index = index;
+            } else {
+                self.selected_folder_index = 0;
+            }
+            self.folder_tree_state.select(Some(self.selected_folder_index));
         }
     }
 

@@ -52,8 +52,11 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
     
-    let list = List::new(items).block(block);
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    
+    f.render_stateful_widget(list, area, &mut app.folder_tree_state);
 }
 
 fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
@@ -61,6 +64,8 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let mut style = if Some(i) == app.current_index {
             Style::default().fg(Color::Rgb(197, 197, 197)).add_modifier(Modifier::BOLD)
+        } else if app.current_index.map_or(false, |curr| i < curr) {
+            Style::default().fg(Color::Rgb(68, 68, 68))
         } else {
             Style::default().fg(Color::Rgb(136, 136, 136))
         };
@@ -83,8 +88,11 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
     
-    let list = List::new(items).block(block);
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    
+    f.render_stateful_widget(list, area, &mut app.queue_state);
 }
 
 fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -95,7 +103,8 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let block = Block::default()
-        .borders(Borders::TOP)
+        .title(" Player ")
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
     
     let inner_area = block.inner(area);
@@ -104,7 +113,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20), // Album art area
+            Constraint::Length(14), // Album art area
             Constraint::Min(0),      // Metadata & Progress
             Constraint::Percentage(30), // Lyrics
         ])
@@ -112,7 +121,10 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Album Art
     if let Some(img) = &app.current_album_art {
-        let area = chunks[0];
+        let mut area = chunks[0];
+        area.x += 1; // Extra left margin
+        area.height = area.height.saturating_sub(1); // Extra bottom margin
+        
         if app.current_protocol.is_none() || app.last_area != Some(area) {
             let size = ratatui::layout::Size::new(area.width, area.height);
             app.current_protocol = app.picker.new_protocol(img.clone(), size, ratatui_image::Resize::Fit(Some(image::imageops::FilterType::CatmullRom))).ok();
@@ -151,7 +163,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let min_lyric_chars: usize = 30;
     let lyric_width = max_visible_lyric_width.max(min_lyric_chars);
 
-    let available_after_album = if inner_area.width > 20 { inner_area.width - 20 } else { 0 };
+    let available_after_album = if inner_area.width > 14 { inner_area.width - 14 } else { 0 };
     let max_lyric_pct = if available_after_album > min_progress_bar_chars {
         ((available_after_album - min_progress_bar_chars) as f64 / inner_area.width as f64 * 100.0) as u16
     } else {
@@ -164,7 +176,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(20),
+            Constraint::Length(14),
             Constraint::Min(0),
             Constraint::Percentage(lyric_pct),
         ])
@@ -206,7 +218,14 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let filled = (width as f64 * progress) as usize;
     let bar_filled = "=".repeat(filled);
     let bar_empty = "-".repeat(width.saturating_sub(filled));
-    let time_info = format!(" {:.0}:{:.0} / {:.0}:{:.0} | Vol: {:.0}% ", pos / 60.0, pos % 60.0, dur / 60.0, dur % 60.0, vol);
+    let time_info = format!(
+        " {}:{:02} / {}:{:02} | Vol: {:.0}% ",
+        (pos / 60.0) as u32,
+        (pos % 60.0) as u32,
+        (dur / 60.0) as u32,
+        (dur % 60.0) as u32,
+        vol
+    );
     
     let progress_text = vec![
         Line::from(vec![
