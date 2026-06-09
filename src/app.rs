@@ -32,6 +32,8 @@ pub struct App {
     pub selected_queue_index: usize,
     pub queue_state: ListState,
     pub show_hidden: bool,
+    pub is_searching: bool,
+    pub search_query: String,
     placeholder_img: image::DynamicImage,
 }
 
@@ -62,6 +64,8 @@ impl App {
             selected_queue_index: 0,
             queue_state: ListState::default(),
             show_hidden: false,
+            is_searching: false,
+            search_query: String::new(),
             placeholder_img,
         };
         app.update_folder_items();
@@ -302,5 +306,23 @@ impl App {
             Focus::Queue => Focus::Player,
             Focus::Player => Focus::Tree,
         };
+    }
+
+    pub fn search(&mut self) {
+        if self.search_query.is_empty() {
+            return;
+        }
+
+        let query = self.search_query.to_lowercase();
+        if let Some(index) = self.folder_items.iter().position(|p| {
+            p.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&query)
+        }) {
+            self.selected_folder_index = index;
+            self.folder_tree_state.select(Some(index));
+        }
     }
 }

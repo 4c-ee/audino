@@ -89,8 +89,32 @@ where B::Error: std::error::Error + Send + Sync + 'static
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                if app.is_searching {
+                    match key.code {
+                        KeyCode::Char(c) => {
+                            app.search_query.push(c);
+                            app.search();
+                        }
+                        KeyCode::Backspace => {
+                            app.search_query.pop();
+                            app.search();
+                        }
+                        KeyCode::Enter | KeyCode::Esc => {
+                            app.is_searching = false;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 match key.code {
                     KeyCode::Char('q') => app.quit(),
+                    KeyCode::Char('/') => {
+                        if app.focus == Focus::Tree {
+                            app.is_searching = true;
+                            app.search_query.clear();
+                        }
+                    }
                     KeyCode::Char('.') => {
                         app.show_hidden = !app.show_hidden;
                         app.update_folder_items();

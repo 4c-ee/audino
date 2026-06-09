@@ -47,8 +47,14 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
         Color::Rgb(136, 136, 136)
     };
 
+    let title = if app.is_searching {
+        format!(" Folder Tree (Search: {}) ", app.search_query)
+    } else {
+        " Folder Tree ".to_string()
+    };
+
     let block = Block::default()
-        .title(" Folder Tree ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
     
