@@ -1,12 +1,40 @@
-<div style="align-items:center;"><img src="audino.png">Audino</div>
+<div style="align-items:center;"><img src="full.png" style="max-width:120px"><br><h2>TUI music player that does music player things.</h2></div>
 
-a "lightweight" "simple" "easy-to-use" "TUI" (sorry i gotta get my keywords in) music player that does music player things.
+a "lightweight" "simple" "easy-to-use" "TUI" (sorry i gotta get my keywords in) music player that does such revolutionary things as:
+1. Play music
+2. Display Lyrics
+3. Display Cover Art
 
-This project is under development and will not be released for a while. Please expect quite a bugs if you build it yourself. But if you do, feel free to report them!
+You can even shuffle songs! Wow!<br><br>
+
+Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI music player built with Ratatui. You have three (technically four) panels:
+- Folder tree, for looking at folders and adding music
+- Queue, for managing the next and previously played songs. Comes with an extra not-really-panel for shuffle/clear/sort.
+- Player, which shows cover art, metadata, progress, and lyrics if applicable.
+
+<img src="preview.png">
 
 ---
-# BIG DISCLAIMER
-The majority of this code was generated with AI. Yeah, vibe coded. A _Rust_ ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
-don't like it? make your own or something. 
+# DISCLAIMER
+The majority of this code was generated with AI. A _Rust_ ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
+
+You're free to make your own, or just use like. [rpmc](https://github.com/mierak/rmpc). it's good too.
 
 I don't claim to make this, the various LLMs I used did. I'm basically just a product manager atp. I did the branding, the publicity, etc. But they're the programmers.
+
+---
+```
+Copyright 2026 4c-ee
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
