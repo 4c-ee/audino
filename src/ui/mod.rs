@@ -76,13 +76,6 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = app.queue.iter().enumerate().map(|(i, item)| {
-        let path = &item.path;
-        let meta = app.metadata.get_metadata(path).ok();
-        let track_num = meta.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_else(|| "??".to_string());
-        let artist = meta.as_ref().and_then(|m| m.artist.clone()).unwrap_or_else(|| "Unknown Artist".to_string());
-        let album = meta.as_ref().and_then(|m| m.album.clone()).unwrap_or_else(|| "Unknown Album".to_string());
-        let title = meta.as_ref().and_then(|m| m.title.clone()).unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
-
         let mut style = if Some(i) == app.current_index {
             Style::default().fg(Color::Rgb(197, 197, 197)).add_modifier(Modifier::BOLD)
         } else if app.current_index.map_or(false, |curr| i < curr) {
@@ -100,10 +93,10 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         }
 
         let line = Line::from(vec![
-            Span::styled(format!("{:>2} ", track_num), style),
-            Span::styled(format!("{:<20} ", artist), style),
-            Span::styled(format!("{:<20} ", album), style),
-            Span::styled(title, style),
+            Span::styled(format!("{:>2} ", item.track_number), style),
+            Span::styled(format!("{:<20} ", item.display_artist), style),
+            Span::styled(format!("{:<20} ", item.display_album), style),
+            Span::styled(item.display_title.clone(), style),
         ]);
 
         ListItem::new(line)
@@ -263,13 +256,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let current_track_item = app.current_index.and_then(|i| app.queue.get(i));
     let (title, artist, album) = if let Some(item) = current_track_item {
-        let path = &item.path;
-        let meta = app.metadata.get_metadata(path).ok();
-        (
-            meta.as_ref().and_then(|m| m.title.clone()).unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string()),
-            meta.as_ref().and_then(|m| m.artist.clone()).unwrap_or_else(|| "Unknown Artist".to_string()),
-            meta.as_ref().and_then(|m| m.album.clone()).unwrap_or_else(|| "Unknown Album".to_string()),
-        )
+        (item.display_title.clone(), item.display_artist.clone(), item.display_album.clone())
     } else {
         ("No track playing".to_string(), "".to_string(), "".to_string())
     };

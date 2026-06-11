@@ -1,7 +1,16 @@
 use std::path::Path;
+use std::sync::OnceLock;
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use ffmpeg_next as ffmpeg;
+
+static FFMPEG_INIT: OnceLock<()> = OnceLock::new();
+
+fn init_ffmpeg() {
+    FFMPEG_INIT.get_or_init(|| {
+        ffmpeg::init().expect("Failed to initialize FFmpeg");
+    });
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackMetadata {
@@ -14,7 +23,7 @@ pub struct TrackMetadata {
 
 pub fn extract_metadata(path: &Path) -> Result<TrackMetadata> {
     crate::log(&format!("Extracting metadata for {:?}", path));
-    ffmpeg::init()?;
+    init_ffmpeg();
     let ictx = ffmpeg::format::input(&path)?;
     
     let mut title = None;
@@ -58,7 +67,7 @@ pub fn extract_metadata(path: &Path) -> Result<TrackMetadata> {
 
 pub fn extract_album_art(path: &Path) -> Result<Option<Vec<u8>>> {
     crate::log(&format!("Extracting album art for {:?}", path));
-    ffmpeg::init()?;
+    init_ffmpeg();
     let mut ictx = ffmpeg::format::input(&path)?;
 
     let stream_index = ictx

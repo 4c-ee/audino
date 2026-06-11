@@ -15,7 +15,13 @@ pub struct MetadataCache {
 pub struct MetadataProvider {
     cache_path: PathBuf,
     cache: MetadataCache,
+    dirty: bool,
+    unsaved_changes: usize,
+    last_save: std::time::Instant,
 }
+
+const SAVE_INTERVAL_MS: u64 = 5000;
+const MIN_CHANGES_BEFORE_SAVE: usize = 10;
 
 impl MetadataProvider {
     pub fn new() -> Self {
@@ -25,7 +31,7 @@ impl MetadataProvider {
             fs::create_dir_all(&cache_dir).ok();
         }
         let cache_path = cache_dir.join("metadata.json");
-        
+
         let cache = if cache_path.exists() {
             fs::read_to_string(&cache_path)
                 .ok()
@@ -35,7 +41,28 @@ impl MetadataProvider {
             MetadataCache::default()
         };
 
-        Self { cache_path, cache }
+        Self {
+            cache_path,
+            cache,
+            dirty: false,
+            unsaved_changes: 0,
+            last_save: std::time::Instant::now(),
+        }
+    }
+
+    fn should_save(&self) -> bool {
+        if !self.dirty {
+            return false;
+        }
+        let time_elapsed = self.last_save.elapsed().as_millis() as u64;
+        self.unsaved_changes >= MIN_CHANGES_BEFORE_SAVE || time_elapsed >= SAVE_INTERVAL_MS
+    }
+
+    pub fn flush(&mut self) -> Result<()> {
+        if self.dirty {
+            self.save_cache()?;
+        }
+        Ok(())
     }
 
     pub fn get_metadata(&mut self, path: &Path) -> Result<TrackMetadata> {
@@ -46,13 +73,20 @@ impl MetadataProvider {
 
         let meta = extract_metadata(path)?;
         self.cache.tracks.insert(path_str, meta.clone());
-        self.save_cache()?;
+        self.dirty = true;
+        self.unsaved_changes += 1;
+        if self.should_save() {
+            self.save_cache()?;
+        }
         Ok(meta)
     }
 
-    fn save_cache(&self) -> Result<()> {
+    fn save_cache(&mut self) -> Result<()> {
         let s = serde_json::to_string(&self.cache)?;
         fs::write(&self.cache_path, s)?;
+        self.dirty = false;
+        self.unsaved_changes = 0;
+        self.last_save = std::time::Instant::now();
         Ok(())
     }
 

@@ -28,10 +28,42 @@ pub enum SortMethod {
     Added,
 }
 
+use crate::metadata::TrackMetadata;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct QueueItem {
     pub path: PathBuf,
-    pub id: usize, // Original addition order
+    pub id: usize,
+    pub display_title: String,
+    pub display_artist: String,
+    pub display_album: String,
+    pub track_number: String,
+}
+
+impl QueueItem {
+    pub fn new(path: PathBuf, id: usize, meta: Option<&TrackMetadata>) -> Self {
+        let track_number = meta
+            .and_then(|m| m.track_number.clone())
+            .unwrap_or_else(|| "??".to_string());
+        let display_artist = meta
+            .and_then(|m| m.artist.clone())
+            .unwrap_or_else(|| "Unknown Artist".to_string());
+        let display_album = meta
+            .and_then(|m| m.album.clone())
+            .unwrap_or_else(|| "Unknown Album".to_string());
+        let display_title = meta
+            .and_then(|m| m.title.clone())
+            .unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
+
+        Self {
+            path,
+            id,
+            display_title,
+            display_artist,
+            display_album,
+            track_number,
+        }
+    }
 }
 
 pub struct App {
@@ -123,7 +155,8 @@ impl App {
 
     pub fn add_to_queue(&mut self, path: PathBuf) {
         if path.is_file() {
-            self.queue.push(QueueItem { path, id: self.next_id });
+            let meta = self.metadata.get_metadata(&path).ok();
+            self.queue.push(QueueItem::new(path, self.next_id, meta.as_ref()));
             self.next_id += 1;
         } else if path.is_dir() {
             let mut items = Vec::new();
@@ -136,15 +169,14 @@ impl App {
                 }
             }
 
-            // Sort by track number then filename
-            let mut meta_items = Vec::new();
+            let mut meta_items: Vec<(u32, PathBuf, Option<TrackMetadata>)> = Vec::new();
             for p in items {
                 let meta = self.metadata.get_metadata(&p).ok();
                 let track = meta.as_ref().and_then(|m| m.track_number.as_ref())
-                    .and_then(|t| t.split('/').next()) // Handle "01/12"
+                    .and_then(|t| t.split('/').next())
                     .and_then(|t| t.parse::<u32>().ok())
                     .unwrap_or(u32::MAX);
-                meta_items.push((track, p));
+                meta_items.push((track, p, meta));
             }
             meta_items.sort_by(|a, b| {
                 match a.0.cmp(&b.0) {
@@ -157,8 +189,8 @@ impl App {
                 }
             });
 
-            for (_, p) in meta_items {
-                self.queue.push(QueueItem { path: p, id: self.next_id });
+            for (_, p, meta) in meta_items {
+                self.queue.push(QueueItem::new(p, self.next_id, meta.as_ref()));
                 self.next_id += 1;
             }
         }
@@ -420,37 +452,21 @@ impl App {
                 return a.id.cmp(&b.id);
             }
 
-            let meta_a = self.metadata.get_metadata(&a.path).ok();
-            let meta_b = self.metadata.get_metadata(&b.path).ok();
-
             let (val_a, val_b) = match self.sort_method {
-                SortMethod::Track => (
-                    meta_a.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_default(),
-                    meta_b.as_ref().and_then(|m| m.track_number.clone()).unwrap_or_default()
-                ),
-                SortMethod::Artist => (
-                    meta_a.as_ref().and_then(|m| m.artist.clone()).unwrap_or_default().to_lowercase(),
-                    meta_b.as_ref().and_then(|m| m.artist.clone()).unwrap_or_default().to_lowercase()
-                ),
-                SortMethod::Album => (
-                    meta_a.as_ref().and_then(|m| m.album.clone()).unwrap_or_default().to_lowercase(),
-                    meta_b.as_ref().and_then(|m| m.album.clone()).unwrap_or_default().to_lowercase()
-                ),
-                SortMethod::Title => (
-                    meta_a.as_ref().and_then(|m| m.title.clone()).unwrap_or_default().to_lowercase(),
-                    meta_b.as_ref().and_then(|m| m.title.clone()).unwrap_or_default().to_lowercase()
-                ),
+                SortMethod::Track => (a.track_number.clone(), b.track_number.clone()),
+                SortMethod::Artist => (a.display_artist.to_lowercase(), b.display_artist.to_lowercase()),
+                SortMethod::Album => (a.display_album.to_lowercase(), b.display_album.to_lowercase()),
+                SortMethod::Title => (a.display_title.to_lowercase(), b.display_title.to_lowercase()),
                 SortMethod::Added => unreachable!(),
             };
 
             match val_a.cmp(&val_b) {
                 std::cmp::Ordering::Equal => {
-                    // Fallback: track # > name
-                    let track_a = meta_a.as_ref().and_then(|m| m.track_number.as_ref())
-                        .and_then(|t| t.split('/').next()).and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
-                    let track_b = meta_b.as_ref().and_then(|m| m.track_number.as_ref())
-                        .and_then(|t| t.split('/').next()).and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
-                    
+                    let track_a = a.track_number.split('/').next()
+                        .and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
+                    let track_b = b.track_number.split('/').next()
+                        .and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
+
                     match track_a.cmp(&track_b) {
                         std::cmp::Ordering::Equal => {
                             let name_a = a.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
