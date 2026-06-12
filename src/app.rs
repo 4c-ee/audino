@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::time::Duration;
 use crate::player::Player;
 use crate::metadata::MetadataProvider;
@@ -30,50 +31,51 @@ pub enum SortMethod {
 
 use crate::metadata::TrackMetadata;
 
-#[derive(Debug, PartialEq, Clone)]
+/// Maximum pixel dimensions for in-memory album art. The picker downscales
+/// per cell at render time. 1024×1024 RGBA = 4MB, sharp even on high-DPI
+/// terminals.
+const ART_MAX_DIM: u32 = 1024;
+
+#[derive(Debug, Clone)]
 pub struct QueueItem {
     pub path: PathBuf,
     pub id: usize,
-    pub display_title: String,
-    pub display_artist: String,
-    pub display_album: String,
-    pub track_number: String,
+    pub meta: Arc<TrackMetadata>,
 }
 
 impl QueueItem {
-    pub fn new(path: PathBuf, id: usize, meta: Option<&TrackMetadata>) -> Self {
-        let track_number = meta
-            .and_then(|m| m.track_number.clone())
-            .unwrap_or_else(|| "??".to_string());
-        let display_artist = meta
-            .and_then(|m| m.artist.clone())
-            .unwrap_or_else(|| "Unknown Artist".to_string());
-        let display_album = meta
-            .and_then(|m| m.album.clone())
-            .unwrap_or_else(|| "Unknown Album".to_string());
-        let display_title = meta
-            .and_then(|m| m.title.clone())
-            .unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
-
-        Self {
-            path,
-            id,
-            display_title,
-            display_artist,
-            display_album,
-            track_number,
-        }
+    pub fn new(path: PathBuf, id: usize, meta: Arc<TrackMetadata>) -> Self {
+        Self { path, id, meta }
     }
+}
+
+/// Cached folder entry: rendered as a `▸ name` or `  name` line.
+#[derive(Clone)]
+pub struct CachedFolderEntry {
+    pub is_dir: bool,
+    pub name: String,
+}
+
+/// Cached queue row: the strings we display, pre-formatted once.
+#[derive(Clone)]
+pub struct CachedQueueEntry {
+    pub track_str: String,
+    pub artist: String,
+    pub album: String,
+    pub title: String,
 }
 
 pub struct App {
     pub player: Player,
     pub metadata: MetadataProvider,
     pub picker: Picker,
-    pub current_album_art: Option<image::DynamicImage>,
+    /// Pre-resized album art for the current track (downsampled to a bounded max on decode).
+    pub current_album_art: Option<Arc<image::DynamicImage>>,
     pub current_protocol: Option<Protocol>,
-    pub last_area: Option<ratatui::layout::Rect>,
+    /// The (cell area) size the current_protocol was built for.
+    pub last_art_area: Option<(u16, u16)>,
     pub lyrics: Vec<LyricLine>,
+    pub lyrics_path: Option<PathBuf>,
     pub running: bool,
     pub library_path: PathBuf,
     pub queue: Vec<QueueItem>,
@@ -91,18 +93,79 @@ pub struct App {
     pub show_hidden: bool,
     pub is_searching: bool,
     pub search_query: String,
-    placeholder_img: image::DynamicImage,
+    /// Cached, downsampled-by-default placeholder for tracks without art.
+    pub placeholder_img: Arc<image::DynamicImage>,
     pub controls: Option<MediaControls>,
     pub mpris_rx: Receiver<MediaControlEvent>,
+    /// Tracks if folder_items Vec needs rebuild before next draw.
+    pub folder_items_dirty: bool,
+    /// Tracks if queue Vec needs rebuild before next queue draw.
+    pub queue_items_dirty: bool,
+    /// Cached folder entry strings. Rebuilt when folder_items_dirty is set
+    /// or when the render area size changes.
+    pub folder_items_cache: Option<Vec<CachedFolderEntry>>,
+    pub folder_items_cache_area: Option<(u16, u16)>,
+    /// Cached queue row strings. Rebuilt when queue_items_dirty is set
+    /// or when the render area size changes.
+    pub queue_items_cache: Option<Vec<CachedQueueEntry>>,
+    pub queue_items_cache_area: Option<(u16, u16)>,
+    tick_render_cache: TickRenderCache,
+    /// Cached sort keys, rebuilt when the queue changes.
+    cached_sort_keys: Option<Vec<SortKey>>,
+}
+
+pub struct TickRenderCache {
+    pub position: f64,
+    pub duration: f64,
+    pub volume: f64,
+    pub last_tick_ms: u128,
+}
+
+#[derive(Clone)]
+struct SortKey {
+    primary: String,
+    track_num: u32,
+    secondary: String,
+    tertiary: String,
+    quaternary: String,
+    name: String,
+    id: usize,
+}
+
+impl Ord for SortKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.primary
+            .cmp(&other.primary)
+            .then(self.track_num.cmp(&other.track_num))
+            .then(self.secondary.cmp(&other.secondary))
+            .then(self.tertiary.cmp(&other.tertiary))
+            .then(self.quaternary.cmp(&other.quaternary))
+            .then(self.name.cmp(&other.name))
+            .then(self.id.cmp(&other.id))
+    }
+}
+
+impl PartialOrd for SortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for SortKey {}
+impl PartialEq for SortKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
 }
 
 impl App {
     pub fn new(library_path: PathBuf) -> Self {
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-        
+
         let placeholder_bytes = include_bytes!("../placeholder.png");
-        let placeholder_img = image::load_from_memory(placeholder_bytes)
+        let placeholder_full = image::load_from_memory(placeholder_bytes)
             .expect("Failed to load embedded placeholder.png");
+        let placeholder_img = Arc::new(pre_resize_for_art(&picker, &placeholder_full));
 
         let (mpris_tx, mpris_rx) = mpsc::channel();
         let config = PlatformConfig {
@@ -115,7 +178,8 @@ impl App {
         if let Some(ref mut c) = controls {
             c.attach(move |event| {
                 mpris_tx.send(event).ok();
-            }).ok();
+            })
+            .ok();
         }
 
         let mut app = Self {
@@ -124,8 +188,9 @@ impl App {
             picker,
             current_album_art: None,
             current_protocol: None,
-            last_area: None,
+            last_art_area: None,
             lyrics: Vec::new(),
+            lyrics_path: None,
             running: true,
             library_path: library_path.clone(),
             queue: Vec::new(),
@@ -146,6 +211,19 @@ impl App {
             placeholder_img,
             controls,
             mpris_rx,
+            folder_items_dirty: true,
+            queue_items_dirty: true,
+            folder_items_cache: None,
+            folder_items_cache_area: None,
+            queue_items_cache: None,
+            queue_items_cache_area: None,
+            tick_render_cache: TickRenderCache {
+                position: 0.0,
+                duration: 0.0,
+                volume: 100.0,
+                last_tick_ms: 0,
+            },
+            cached_sort_keys: None,
         };
         app.update_folder_items();
         app.folder_tree_state.select(Some(0));
@@ -155,9 +233,12 @@ impl App {
 
     pub fn add_to_queue(&mut self, path: PathBuf) {
         if path.is_file() {
-            let meta = self.metadata.get_metadata(&path).ok();
-            self.queue.push(QueueItem::new(path, self.next_id, meta.as_ref()));
-            self.next_id += 1;
+            if let Ok(meta) = self.metadata.get_metadata(&path) {
+                self.queue.push(QueueItem::new(path, self.next_id, meta));
+                self.next_id += 1;
+                self.queue_items_dirty = true;
+                self.cached_sort_keys = None;
+            }
         } else if path.is_dir() {
             let mut items = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&path) {
@@ -169,30 +250,33 @@ impl App {
                 }
             }
 
-            let mut meta_items: Vec<(u32, PathBuf, Option<TrackMetadata>)> = Vec::new();
+            let mut meta_items: Vec<(u32, PathBuf, Arc<TrackMetadata>)> = Vec::new();
             for p in items {
-                let meta = self.metadata.get_metadata(&p).ok();
-                let track = meta.as_ref().and_then(|m| m.track_number.as_ref())
-                    .and_then(|t| t.split('/').next())
-                    .and_then(|t| t.parse::<u32>().ok())
-                    .unwrap_or(u32::MAX);
-                meta_items.push((track, p, meta));
-            }
-            meta_items.sort_by(|a, b| {
-                match a.0.cmp(&b.0) {
-                    std::cmp::Ordering::Equal => {
-                        let a_name = a.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                        let b_name = b.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                        a_name.cmp(&b_name)
-                    },
-                    other => other,
+                if let Ok(meta) = self.metadata.get_metadata(&p) {
+                    let track = meta
+                        .track_number
+                        .as_deref()
+                        .and_then(|t| t.split('/').next())
+                        .and_then(|t| t.parse::<u32>().ok())
+                        .unwrap_or(u32::MAX);
+                    meta_items.push((track, p, meta));
                 }
+            }
+            meta_items.sort_by(|a, b| match a.0.cmp(&b.0) {
+                std::cmp::Ordering::Equal => {
+                    let a_name = a.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    let b_name = b.1.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    a_name.cmp(&b_name)
+                }
+                other => other,
             });
 
             for (_, p, meta) in meta_items {
-                self.queue.push(QueueItem::new(p, self.next_id, meta.as_ref()));
+                self.queue.push(QueueItem::new(p, self.next_id, meta));
                 self.next_id += 1;
             }
+            self.queue_items_dirty = true;
+            self.cached_sort_keys = None;
         }
     }
 
@@ -231,6 +315,7 @@ impl App {
             let b_str = b.to_string_lossy().to_lowercase();
             a_str.cmp(&b_str)
         });
+        self.folder_items_dirty = true;
     }
 
     pub fn play_index(&mut self, index: usize) {
@@ -250,7 +335,6 @@ impl App {
     }
 
     pub fn tick(&mut self) {
-        // Handle auto-play next track
         if self.player.is_empty() {
             if let Some(current) = self.current_index {
                 let next = current + 1;
@@ -262,50 +346,61 @@ impl App {
                 }
             }
         }
+        let pos = self.player.get_position().unwrap_or(0.0);
+        let dur = self.player.get_duration().unwrap_or(0.0);
+        let vol = self.player.get_volume().unwrap_or(100.0);
+        self.tick_render_cache.position = pos;
+        self.tick_render_cache.duration = dur;
+        self.tick_render_cache.volume = vol;
+        self.tick_render_cache.last_tick_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
         self.update_mpris_playback();
     }
 
     fn load_track_assets(&mut self, path: &PathBuf) {
-        // Load album art
-        let mut art_img = None;
-
-        // 1. Try embedded art
-        if let Ok(Some(art_path)) = self.metadata.get_or_extract_album_art(path) {
-            art_img = self.load_image(&art_path);
+        let mut art_path: Option<PathBuf> = None;
+        if let Ok(Some(p)) = self.metadata.get_or_extract_album_art(path) {
+            art_path = Some(p);
         }
-
-        // 2. Try external cover files in the same folder
-        if art_img.is_none() {
+        if art_path.is_none() {
             if let Some(parent) = path.parent() {
-                for ext in &["png", "jpg", "webp"] {
+                for ext in &["png", "jpg", "jpeg", "webp"] {
                     let cover_path = parent.join(format!("cover.{}", ext));
                     if cover_path.exists() {
-                        art_img = self.load_image(&cover_path);
-                        if art_img.is_some() {
-                            break;
-                        }
+                        art_path = Some(cover_path);
+                        break;
                     }
                 }
             }
         }
 
-        // 3. Fallback to embedded placeholder
-        self.current_album_art = Some(art_img.unwrap_or_else(|| self.placeholder_img.clone()));
-        self.current_protocol = None;
+        let decoded = art_path
+            .as_deref()
+            .and_then(|p| image::ImageReader::open(p).ok())
+            .and_then(|r| r.with_guessed_format().ok())
+            .and_then(|r| r.decode().ok());
 
-        // Load lyrics
+        match decoded {
+            Some(img) => {
+                let resized = pre_resize_for_art(&self.picker, &img);
+                self.current_album_art = Some(Arc::new(resized));
+            }
+            None => {
+                self.current_album_art = None;
+            }
+        }
+        self.current_protocol = None;
+        self.last_art_area = None;
+
         if let Some(lrc_path) = lyrics::find_lrc_file(path) {
+            self.lyrics_path = Some(lrc_path.clone());
             self.lyrics = lyrics::parse_lrc(&lrc_path);
         } else {
+            self.lyrics_path = None;
             self.lyrics = Vec::new();
         }
-    }
-
-    fn load_image(&self, path: &PathBuf) -> Option<image::DynamicImage> {
-        image::ImageReader::open(path)
-            .ok()
-            .and_then(|r| r.with_guessed_format().ok())
-            .and_then(|r| r.decode().ok())
     }
 
     pub fn play_selected_tree(&mut self) {
@@ -330,12 +425,12 @@ impl App {
                 if self.selected_queue_index > 0 {
                     if self.is_moving_track {
                         self.queue.swap(self.selected_queue_index, self.selected_queue_index - 1);
-                        // Update current_index if it was swapped
                         if Some(self.selected_queue_index) == self.current_index {
                             self.current_index = Some(self.selected_queue_index - 1);
                         } else if Some(self.selected_queue_index - 1) == self.current_index {
                             self.current_index = Some(self.selected_queue_index);
                         }
+                        self.cached_sort_keys = None;
                     }
                     self.selected_queue_index -= 1;
                     self.queue_state.select(Some(self.selected_queue_index));
@@ -362,19 +457,19 @@ impl App {
                 if self.selected_queue_index < self.queue.len().saturating_sub(1) {
                     if self.is_moving_track {
                         self.queue.swap(self.selected_queue_index, self.selected_queue_index + 1);
-                        // Update current_index if it was swapped
                         if Some(self.selected_queue_index) == self.current_index {
                             self.current_index = Some(self.selected_queue_index + 1);
                         } else if Some(self.selected_queue_index + 1) == self.current_index {
                             self.current_index = Some(self.selected_queue_index);
                         }
+                        self.cached_sort_keys = None;
                     }
                     self.selected_queue_index += 1;
                     self.queue_state.select(Some(self.selected_queue_index));
                 }
             }
             Focus::QueueControls => {
-                if self.selected_control_index < 2 { // 0: Shuffle, 1: Clear, 2: Sort
+                if self.selected_control_index < 2 {
                     self.selected_control_index += 1;
                 }
             }
@@ -385,13 +480,10 @@ impl App {
     pub fn remove_selected_queue_track(&mut self) {
         if !self.queue.is_empty() && self.selected_queue_index < self.queue.len() {
             self.queue.remove(self.selected_queue_index);
-            
-            // Adjust current_index
+
             if let Some(curr) = self.current_index {
                 if curr == self.selected_queue_index {
                     self.current_index = None;
-                    // Optionally stop playback or skip to next? 
-                    // Let's just leave it for now.
                 } else if curr > self.selected_queue_index {
                     self.current_index = Some(curr - 1);
                 }
@@ -401,13 +493,15 @@ impl App {
                 self.selected_queue_index = self.queue.len() - 1;
             }
             self.queue_state.select(Some(self.selected_queue_index));
+            self.queue_items_dirty = true;
+            self.cached_sort_keys = None;
         }
     }
 
     pub fn shuffle_queue(&mut self) {
         use rand::seq::SliceRandom;
         let mut rng = rand::rng();
-        
+
         if let Some(curr) = self.current_index {
             if curr + 1 < self.queue.len() {
                 let (_, next_up) = self.queue.split_at_mut(curr + 1);
@@ -416,6 +510,8 @@ impl App {
         } else {
             self.queue.shuffle(&mut rng);
         }
+        self.cached_sort_keys = None;
+        self.queue_items_dirty = true;
     }
 
     pub fn clear_queue(&mut self) {
@@ -431,6 +527,8 @@ impl App {
             self.selected_queue_index = 0;
         }
         self.queue_state.select(Some(self.selected_queue_index));
+        self.queue_items_dirty = true;
+        self.cached_sort_keys = None;
     }
 
     pub fn cycle_sort_method(&mut self) {
@@ -445,44 +543,68 @@ impl App {
     }
 
     pub fn apply_sort(&mut self) {
-        let current_item = self.current_index.and_then(|i| self.queue.get(i).cloned());
+        let current_id = self.current_index.and_then(|i| self.queue.get(i).map(|it| it.id));
 
-        self.queue.sort_by(|a, b| {
-            if self.sort_method == SortMethod::Added {
-                return a.id.cmp(&b.id);
-            }
+        let keys = self.build_sort_keys();
+        let mut indices: Vec<usize> = (0..self.queue.len()).collect();
+        indices.sort_by(|&a, &b| keys[a].cmp(&keys[b]));
+        let new_queue: Vec<QueueItem> = indices.iter().map(|&i| self.queue[i].clone()).collect();
+        self.queue = new_queue;
+        // keys still align by index since both are reordered identically
+        self.cached_sort_keys = Some(keys);
 
-            let (val_a, val_b) = match self.sort_method {
-                SortMethod::Track => (a.track_number.clone(), b.track_number.clone()),
-                SortMethod::Artist => (a.display_artist.to_lowercase(), b.display_artist.to_lowercase()),
-                SortMethod::Album => (a.display_album.to_lowercase(), b.display_album.to_lowercase()),
-                SortMethod::Title => (a.display_title.to_lowercase(), b.display_title.to_lowercase()),
-                SortMethod::Added => unreachable!(),
-            };
-
-            match val_a.cmp(&val_b) {
-                std::cmp::Ordering::Equal => {
-                    let track_a = a.track_number.split('/').next()
-                        .and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
-                    let track_b = b.track_number.split('/').next()
-                        .and_then(|t| t.parse::<u32>().ok()).unwrap_or(u32::MAX);
-
-                    match track_a.cmp(&track_b) {
-                        std::cmp::Ordering::Equal => {
-                            let name_a = a.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                            let name_b = b.path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                            name_a.cmp(&name_b)
-                        }
-                        other => other,
-                    }
-                }
-                other => other,
-            }
-        });
-
-        if let Some(item) = current_item {
-            self.current_index = self.queue.iter().position(|it| it == &item);
+        if let Some(id) = current_id {
+            self.current_index = self.queue.iter().position(|it| it.id == id);
         }
+        self.queue_items_dirty = true;
+    }
+
+    fn build_sort_keys(&self) -> Vec<SortKey> {
+        if let Some(keys) = &self.cached_sort_keys {
+            if keys.len() == self.queue.len() {
+                return keys.clone();
+            }
+        }
+        self.queue
+            .iter()
+            .map(|item| {
+                let track_str = item.meta.track_number.clone().unwrap_or_default();
+                let track_num = item
+                    .meta
+                    .track_number
+                    .as_deref()
+                    .and_then(|t| t.split('/').next())
+                    .and_then(|t| t.parse::<u32>().ok())
+                    .unwrap_or(u32::MAX);
+
+                let title = item.meta.title.as_deref().unwrap_or("").to_lowercase();
+                let artist = item.meta.artist.as_deref().unwrap_or("").to_lowercase();
+                let album = item.meta.album.as_deref().unwrap_or("").to_lowercase();
+                let name = item
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+                    .to_lowercase();
+
+                let (primary, secondary, tertiary) = match self.sort_method {
+                    SortMethod::Added => (String::new(), String::new(), String::new()),
+                    SortMethod::Track => (track_str.to_lowercase(), artist.clone(), album.clone()),
+                    SortMethod::Artist => (artist, album.clone(), title.clone()),
+                    SortMethod::Album => (album, artist.clone(), title.clone()),
+                    SortMethod::Title => (title, artist.clone(), album.clone()),
+                };
+                SortKey {
+                    primary,
+                    track_num,
+                    secondary,
+                    tertiary,
+                    quaternary: String::new(),
+                    name,
+                    id: item.id,
+                }
+            })
+            .collect()
     }
 
     pub fn execute_selected_control(&mut self) {
@@ -510,7 +632,7 @@ impl App {
         if let Some(parent) = self.library_path.parent() {
             self.library_path = parent.to_path_buf();
             self.update_folder_items();
-            
+
             if let Some(index) = self.folder_items.iter().position(|p| p == &old_path) {
                 self.selected_folder_index = index;
             } else {
@@ -643,4 +765,26 @@ impl App {
             }
         }
     }
+
+    pub fn cached_player_state(&self) -> (f64, f64, f64) {
+        (
+            self.tick_render_cache.position,
+            self.tick_render_cache.duration,
+            self.tick_render_cache.volume,
+        )
+    }
+}
+
+/// Resize an image so its largest dimension is at most `ART_MAX_DIM`.
+/// Caps in-memory album art at ~4MB worst case (1024x1024 RGBA) while still
+/// leaving the picker enough source pixels to downscale sharply per cell.
+fn pre_resize_for_art(_picker: &Picker, img: &image::DynamicImage) -> image::DynamicImage {
+    if img.width() <= ART_MAX_DIM && img.height() <= ART_MAX_DIM {
+        return img.clone();
+    }
+    let scale = (ART_MAX_DIM as f64 / img.width() as f64)
+        .min(ART_MAX_DIM as f64 / img.height() as f64);
+    let nw = ((img.width() as f64) * scale).round().max(1.0) as u32;
+    let nh = ((img.height() as f64) * scale).round().max(1.0) as u32;
+    img.resize(nw, nh, image::imageops::FilterType::Triangle)
 }

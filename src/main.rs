@@ -17,11 +17,26 @@ use ratatui::{
 };
 use app::{App, Focus};
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{BufWriter, Write};
+use std::sync::Mutex;
+
+static LOG_FILE: Mutex<Option<BufWriter<std::fs::File>>> = Mutex::new(None);
 
 pub fn log(msg: &str) {
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("audino.log") {
-        writeln!(file, "{} - {}", Instant::now().elapsed().as_millis(), msg).ok();
+    let mut guard = LOG_FILE.lock().expect("LOG_FILE poisoned");
+    if guard.is_none() {
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open("audino.log") {
+            *guard = Some(BufWriter::new(file));
+        }
+    }
+    if let Some(writer) = guard.as_mut() {
+        let _ = writeln!(
+            writer,
+            "{} - {}",
+            Instant::now().elapsed().as_millis(),
+            msg
+        );
+        let _ = writer.flush();
     }
 }
 
@@ -53,6 +68,8 @@ fn main() -> Result<()> {
 
     let tick_rate = Duration::from_millis(100);
     let res = run_app(&mut terminal, &mut app, tick_rate);
+
+    app.metadata.flush().ok();
 
     // Restore terminal
     disable_raw_mode()?;
