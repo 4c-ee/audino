@@ -431,6 +431,7 @@ impl App {
                             self.current_index = Some(self.selected_queue_index);
                         }
                         self.cached_sort_keys = None;
+                        self.queue_items_dirty = true;
                     }
                     self.selected_queue_index -= 1;
                     self.queue_state.select(Some(self.selected_queue_index));
@@ -463,6 +464,7 @@ impl App {
                             self.current_index = Some(self.selected_queue_index);
                         }
                         self.cached_sort_keys = None;
+                        self.queue_items_dirty = true;
                     }
                     self.selected_queue_index += 1;
                     self.queue_state.select(Some(self.selected_queue_index));
