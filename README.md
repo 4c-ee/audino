@@ -13,7 +13,7 @@ Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI musi
 - Player, which shows cover art, metadata, progress, and lyrics if applicable.
 
 <img src="assets/preview.png">
-
+<h6>uses terminal font, pictured is [pixel code](https://github.com/qwerasd205/PixelCode)</h6>
 ---
 # DISCLAIMER
 The majority of this code was generated with AI. A _Rust_ ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
