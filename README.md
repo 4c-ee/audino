@@ -14,6 +14,7 @@ Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI musi
 
 <img src="assets/preview.png">
 <h6>uses terminal font, pictured is <a href="https://github.com/qwerasd205/PixelCode">pixel code</a></h6>
+
 ---
 # DISCLAIMER
 The majority of this code was generated with AI. A _Rust_ ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
