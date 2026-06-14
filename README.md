@@ -49,11 +49,12 @@ You're free to make your own, or use one of many alternatives out there.
 I don't claim to make this, the various LLMs I used did. I'm basically just a product manager atp. I did the branding, the publicity, etc. But they're the programmers.
 
 
-Are you willing to trust an AI to run code on your computer? To trust me? 
-
-Do you have the knowledge to read and understand this source code and/or the AUR PKGBUILD? I know it contains no viruses, but do you?
-
-If the answer is "no" to all, you should find out how to say yes to one or more of them, then download it :)
+> [!CAUTION]
+>Are you willing to trust an AI to run code on your computer? To trust me? 
+>
+>Do you have the knowledge to read and understand this source code and/or the AUR PKGBUILD? I know it contains no viruses, but do you?
+>
+>If the answer is "no" to all, you should find out how to say yes to one or more of them, then download it :)
 
 ---
 ```
