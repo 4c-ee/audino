@@ -5,6 +5,8 @@ use std::time::Duration;
 use crate::player::Player;
 use crate::metadata::MetadataProvider;
 use crate::lyrics::{self, LyricLine};
+use crate::config::Config;
+use crate::lastfm::LastFMClient;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
 use ratatui::widgets::ListState;
@@ -69,10 +71,8 @@ pub struct App {
     pub player: Player,
     pub metadata: MetadataProvider,
     pub picker: Picker,
-    /// Pre-resized album art for the current track (downsampled to a bounded max on decode).
     pub current_album_art: Option<Arc<image::DynamicImage>>,
     pub current_protocol: Option<Protocol>,
-    /// The (cell area) size the current_protocol was built for.
     pub last_art_area: Option<(u16, u16)>,
     pub lyrics: Vec<LyricLine>,
     pub lyrics_path: Option<PathBuf>,
@@ -93,10 +93,13 @@ pub struct App {
     pub show_hidden: bool,
     pub is_searching: bool,
     pub search_query: String,
-    /// Cached, downsampled-by-default placeholder for tracks without art.
     pub placeholder_img: Arc<image::DynamicImage>,
     pub controls: Option<MediaControls>,
     pub mpris_rx: Receiver<MediaControlEvent>,
+    pub config: Config,
+    pub lastfm: Option<LastFMClient>,
+    pub lastfm_scrobbled: bool,
+    pub lastfm_now_playing_sent: bool,
     /// Tracks if folder_items Vec needs rebuild before next draw.
     pub folder_items_dirty: bool,
     /// Tracks if queue Vec needs rebuild before next queue draw.
@@ -159,7 +162,7 @@ impl PartialEq for SortKey {
 }
 
 impl App {
-    pub fn new(library_path: PathBuf) -> Self {
+    pub fn new(library_path: PathBuf, config: Config) -> Self {
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
         let placeholder_bytes = include_bytes!("../placeholder.png");
@@ -168,18 +171,23 @@ impl App {
         let placeholder_img = Arc::new(pre_resize_for_art(&picker, &placeholder_full));
 
         let (mpris_tx, mpris_rx) = mpsc::channel();
-        let config = PlatformConfig {
+        let config_mpris = PlatformConfig {
             dbus_name: "audino",
             display_name: "audino",
             hwnd: None,
         };
 
-        let mut controls = MediaControls::new(config).ok();
+        let mut controls = MediaControls::new(config_mpris).ok();
         if let Some(ref mut c) = controls {
             c.attach(move |event| {
                 mpris_tx.send(event).ok();
             })
             .ok();
+        }
+
+        let lastfm = LastFMClient::from_config(&config);
+        if lastfm.is_some() {
+            crate::log("Last.FM client initialized");
         }
 
         let mut app = Self {
@@ -211,6 +219,10 @@ impl App {
             placeholder_img,
             controls,
             mpris_rx,
+            config,
+            lastfm,
+            lastfm_scrobbled: false,
+            lastfm_now_playing_sent: false,
             folder_items_dirty: true,
             queue_items_dirty: true,
             folder_items_cache: None,
@@ -326,6 +338,8 @@ impl App {
                 crate::log(&format!("App: Error playing file: {:?}", e));
             } else {
                 self.current_index = Some(index);
+                self.lastfm_scrobbled = false;
+                self.lastfm_now_playing_sent = false;
                 self.load_track_assets(&path);
                 self.update_mpris_metadata(&path);
             }
@@ -357,6 +371,47 @@ impl App {
             .map(|d| d.as_millis())
             .unwrap_or(0);
         self.update_mpris_playback();
+        self.check_lastfm_scrobble(pos, dur);
+    }
+
+    fn check_lastfm_scrobble(&mut self, pos: f64, dur: f64) {
+        if dur <= 0.0 || pos <= 0.0 || self.lastfm_scrobbled {
+            return;
+        }
+        if self.player.get_paused().unwrap_or(true) {
+            return;
+        }
+        let Some(idx) = self.current_index else { return };
+        let Some(item) = self.queue.get(idx) else { return };
+        let Some(artist) = &item.meta.artist else { return };
+        let Some(track) = &item.meta.title else { return };
+
+        if !self.lastfm_now_playing_sent {
+            if let Some(ref lastfm) = self.lastfm {
+                let album = item.meta.album.as_deref();
+                if let Err(e) = lastfm.update_now_playing(artist, track, album) {
+                    crate::log(&format!("Last.FM now playing error: {}", e));
+                }
+            }
+            self.lastfm_now_playing_sent = true;
+        }
+
+        let threshold = (dur / 2.0).min(240.0).max(30.0);
+        if pos >= threshold {
+            if let Some(ref lastfm) = self.lastfm {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let album = item.meta.album.as_deref();
+                if let Err(e) = lastfm.scrobble(artist, track, album, timestamp) {
+                    crate::log(&format!("Last.FM scrobble error: {}", e));
+                } else {
+                    crate::log("Last.FM: track scrobbled");
+                }
+            }
+            self.lastfm_scrobbled = true;
+        }
     }
 
     fn load_track_assets(&mut self, path: &PathBuf) {
@@ -774,6 +829,20 @@ impl App {
             self.tick_render_cache.duration,
             self.tick_render_cache.volume,
         )
+    }
+
+    pub fn lastfm_auth(&mut self, token: &str) {
+        if let Some(ref mut lastfm) = self.lastfm {
+            if let Err(e) = lastfm.auth_with_token(token) {
+                crate::log(&format!("Last.FM auth error: {}", e));
+                return;
+            }
+            if let Some(sk) = lastfm.session_key() {
+                self.config.set("lastfm", "session_key", &sk);
+                self.config.save().ok();
+                crate::log("Last.FM: session key saved to config");
+            }
+        }
     }
 }
 

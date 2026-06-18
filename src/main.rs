@@ -3,6 +3,8 @@ mod player;
 mod metadata;
 mod ui;
 mod lyrics;
+mod config;
+mod lastfm;
 
 use std::{io, time::{Duration, Instant}, path::PathBuf};
 use anyhow::Result;
@@ -16,6 +18,7 @@ use ratatui::{
     Terminal,
 };
 use app::{App, Focus};
+use config::Config;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::sync::Mutex;
@@ -64,7 +67,11 @@ fn main() -> Result<()> {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         PathBuf::from(home).join("Music")
     });
-    let mut app = App::new(library_path);
+
+    let config = Config::load();
+    log(&format!("Config loaded from {:?}", config.path()));
+
+    let mut app = App::new(library_path, config);
 
     let tick_rate = Duration::from_millis(100);
     let res = run_app(&mut terminal, &mut app, tick_rate);
