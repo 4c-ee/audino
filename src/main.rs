@@ -114,6 +114,25 @@ where B::Error: std::error::Error + Send + Sync + 'static
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                if app.settings_open {
+                    match key.code {
+                        KeyCode::Esc => {
+                            if app.settings_editing.is_some() {
+                                app.settings_cancel_editing();
+                            } else {
+                                app.settings_open = false;
+                            }
+                        }
+                        KeyCode::Enter => app.settings_activate(),
+                        KeyCode::Up => app.settings_move_up(),
+                        KeyCode::Down => app.settings_move_down(),
+                        KeyCode::Backspace => app.settings_backspace(),
+                        KeyCode::Char(c) => app.settings_input_char(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 if app.is_searching {
                     match key.code {
                         KeyCode::Char(c) => {
@@ -140,6 +159,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
                             app.search_query.clear();
                         }
                     }
+                    KeyCode::Char('S') => app.toggle_settings(),
                     KeyCode::Char('.') => {
                         app.show_hidden = !app.show_hidden;
                         app.update_folder_items();
@@ -170,6 +190,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol + 5.0).min(100.0)).ok();
                         }
+                        _ => {}
                     },
                     KeyCode::Down => match app.focus {
                         Focus::Tree | Focus::Queue | Focus::QueueControls => app.move_down(),
@@ -177,6 +198,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
                             let vol = app.player.get_volume().unwrap_or(100.0);
                             app.player.set_volume((vol - 5.0).max(0.0)).ok();
                         }
+                        _ => {}
                     },
                     KeyCode::Left => match app.focus {
                         Focus::Tree => app.go_back(),

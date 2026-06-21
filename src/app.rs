@@ -20,6 +20,7 @@ pub enum Focus {
     Queue,
     QueueControls,
     Player,
+    Settings,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -100,6 +101,13 @@ pub struct App {
     pub lastfm: Option<LastFMClient>,
     pub lastfm_scrobbled: bool,
     pub lastfm_now_playing_sent: bool,
+    pub settings_open: bool,
+    pub settings_focus: usize,
+    pub settings_editing: Option<usize>,
+    pub settings_api_key_buf: String,
+    pub settings_api_secret_buf: String,
+    pub settings_auth_token_buf: String,
+    pub settings_status_msg: Option<String>,
     /// Tracks if folder_items Vec needs rebuild before next draw.
     pub folder_items_dirty: bool,
     /// Tracks if queue Vec needs rebuild before next queue draw.
@@ -223,6 +231,13 @@ impl App {
             lastfm,
             lastfm_scrobbled: false,
             lastfm_now_playing_sent: false,
+            settings_open: false,
+            settings_focus: 0,
+            settings_editing: None,
+            settings_api_key_buf: String::new(),
+            settings_api_secret_buf: String::new(),
+            settings_auth_token_buf: String::new(),
+            settings_status_msg: None,
             folder_items_dirty: true,
             queue_items_dirty: true,
             folder_items_cache: None,
@@ -295,7 +310,7 @@ impl App {
     fn is_audio_file(&self, path: &PathBuf) -> bool {
         path.extension().map_or(false, |ext| {
             let ext = ext.to_string_lossy().to_lowercase();
-            ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "m4a" || ext == "opus"
+            ext == "mp3" || ext == "flac" || ext == "ogg" || ext == "m4a" || ext == "opus" || ext == "wav"
         })
     }
 
@@ -709,6 +724,7 @@ impl App {
             Focus::Queue => Focus::QueueControls,
             Focus::QueueControls => Focus::Player,
             Focus::Player => Focus::Tree,
+            Focus::Settings => Focus::Tree,
         };
     }
 
@@ -831,16 +847,157 @@ impl App {
         )
     }
 
-    pub fn lastfm_auth(&mut self, token: &str) {
-        if let Some(ref mut lastfm) = self.lastfm {
-            if let Err(e) = lastfm.auth_with_token(token) {
-                crate::log(&format!("Last.FM auth error: {}", e));
-                return;
+    pub fn toggle_settings(&mut self) {
+        self.settings_open = !self.settings_open;
+        if self.settings_open {
+            self.settings_editing = None;
+            self.settings_focus = 0;
+            self.settings_api_key_buf = self.config.get("lastfm", "api_key").unwrap_or_default();
+            self.settings_api_secret_buf = self.config.get("lastfm", "api_secret").unwrap_or_default();
+            self.settings_auth_token_buf.clear();
+            self.settings_status_msg = None;
+        }
+    }
+
+    pub fn settings_move_up(&mut self) {
+        if self.settings_editing.is_some() {
+            return;
+        }
+        if self.settings_focus > 0 {
+            self.settings_focus -= 1;
+        }
+    }
+
+    pub fn settings_move_down(&mut self) {
+        if self.settings_editing.is_some() {
+            return;
+        }
+        if self.settings_focus < 4 {
+            self.settings_focus += 1;
+        }
+    }
+
+    pub fn settings_activate(&mut self) {
+        if self.settings_editing.is_some() {
+            self.settings_confirm_editing();
+            return;
+        }
+        match self.settings_focus {
+            0 | 1 | 2 => {
+                self.settings_editing = Some(self.settings_focus);
             }
-            if let Some(sk) = lastfm.session_key() {
-                self.config.set("lastfm", "session_key", &sk);
-                self.config.save().ok();
-                crate::log("Last.FM: session key saved to config");
+            3 => {
+                self.settings_do_authorize();
+            }
+            4 => {
+                self.settings_open_url();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn settings_input_char(&mut self, c: char) {
+        match self.settings_editing {
+            Some(0) => self.settings_api_key_buf.push(c),
+            Some(1) => self.settings_api_secret_buf.push(c),
+            Some(2) => self.settings_auth_token_buf.push(c),
+            _ => {}
+        }
+    }
+
+    pub fn settings_backspace(&mut self) {
+        match self.settings_editing {
+            Some(0) => { self.settings_api_key_buf.pop(); }
+            Some(1) => { self.settings_api_secret_buf.pop(); }
+            Some(2) => { self.settings_auth_token_buf.pop(); }
+            _ => {}
+        }
+    }
+
+    pub fn settings_cancel_editing(&mut self) {
+        if let Some(idx) = self.settings_editing {
+            if idx == 0 {
+                self.settings_api_key_buf = self.config.get("lastfm", "api_key").unwrap_or_default();
+            } else if idx == 1 {
+                self.settings_api_secret_buf = self.config.get("lastfm", "api_secret").unwrap_or_default();
+            } else if idx == 2 {
+                self.settings_auth_token_buf.clear();
+            }
+        }
+        self.settings_editing = None;
+    }
+
+    pub fn settings_confirm_editing(&mut self) {
+        if let Some(idx) = self.settings_editing {
+            match idx {
+                0 => {
+                    self.config.set("lastfm", "api_key", &self.settings_api_key_buf);
+                    self.config.save().ok();
+                    self.reinit_lastfm();
+                }
+                1 => {
+                    self.config.set("lastfm", "api_secret", &self.settings_api_secret_buf);
+                    self.config.save().ok();
+                    self.reinit_lastfm();
+                }
+                2 => {
+                    self.settings_do_authorize();
+                }
+                _ => {}
+            }
+        }
+        self.settings_editing = None;
+    }
+
+    fn reinit_lastfm(&mut self) {
+        self.lastfm = LastFMClient::from_config(&self.config);
+        if self.lastfm.is_some() {
+            crate::log("Last.FM client reinitialized from settings");
+        }
+    }
+
+    fn settings_do_authorize(&mut self) {
+        if self.settings_auth_token_buf.is_empty() {
+            self.settings_status_msg = Some("Enter an auth token first".to_string());
+            return;
+        }
+        let token = self.settings_auth_token_buf.clone();
+        if let Some(ref mut lastfm) = self.lastfm {
+            match lastfm.auth_with_token(&token) {
+                Ok(()) => {
+                    if let Some(sk) = lastfm.session_key() {
+                        self.config.set("lastfm", "session_key", &sk);
+                        self.config.save().ok();
+                        self.settings_status_msg = Some("Authenticated successfully".to_string());
+                        crate::log("Last.FM: session key saved to config");
+                    }
+                }
+                Err(e) => {
+                    self.settings_status_msg = Some(format!("Auth failed: {}", e));
+                    crate::log(&format!("Last.FM auth error: {}", e));
+                }
+            }
+        } else {
+            self.settings_status_msg = Some("Configure API key/secret first".to_string());
+        }
+    }
+
+    fn settings_open_url(&mut self) {
+        let url = if let Some(ref lastfm) = self.lastfm {
+            lastfm.get_auth_url()
+        } else {
+            self.settings_status_msg = Some("Configure API key/secret first".to_string());
+            return;
+        };
+        match std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+        {
+            Ok(_) => {
+                self.settings_status_msg = Some("Opened auth URL in browser".to_string());
+            }
+            Err(e) => {
+                self.settings_status_msg = Some(format!("Failed to open: {}", e));
             }
         }
     }
