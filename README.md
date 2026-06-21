@@ -12,7 +12,7 @@ Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI musi
 - Queue, for managing the next and previously played songs. Comes with an extra not-really-panel for shuffle/clear/sort.
 - Player, which shows cover art, metadata, progress, and lyrics if applicable.
 
-Audino is intended to push past the strange keybinds, outdated format support, and other issues that plague TUI music players to this day.
+Audino is intended to push past the strange keybinds, outdated format support, un-gapless playback,and other issues that plague TUI music players to this day.
 
 It looks like this:
 <img src="assets/preview.png">
