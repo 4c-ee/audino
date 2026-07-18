@@ -16,12 +16,18 @@ use ratatui::{
     Terminal,
 };
 use app::{App, Focus};
+
+#[cfg(debug_assertions)]
 use std::fs::OpenOptions;
+#[cfg(debug_assertions)]
 use std::io::{BufWriter, Write};
+#[cfg(debug_assertions)]
 use std::sync::Mutex;
 
+#[cfg(debug_assertions)]
 static LOG_FILE: Mutex<Option<BufWriter<std::fs::File>>> = Mutex::new(None);
 
+#[cfg(debug_assertions)]
 pub fn log(msg: &str) {
     let mut guard = LOG_FILE.lock().expect("LOG_FILE poisoned");
     if guard.is_none() {
@@ -39,6 +45,9 @@ pub fn log(msg: &str) {
         let _ = writer.flush();
     }
 }
+
+#[cfg(not(debug_assertions))]
+pub fn log(_msg: &str) {}
 
 fn main() -> Result<()> {
     log("Starting audino");
