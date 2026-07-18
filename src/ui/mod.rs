@@ -92,7 +92,7 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
     let border_color = if app.focus == Focus::Tree {
         Color::Rgb(197, 197, 197)
     } else {
-        Color::Rgb(136, 136, 136)
+        Color::Rgb(128, 128, 128)
     };
 
     let title = if app.is_searching {
@@ -196,7 +196,7 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
     let border_color = if app.focus == Focus::Queue {
         Color::Rgb(197, 197, 197)
     } else {
-        Color::Rgb(136, 136, 136)
+        Color::Rgb(128, 128, 128)
     };
 
     let title = if app.is_moving_track {
@@ -240,7 +240,7 @@ fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect) {
     let border_color = if app.focus == Focus::QueueControls {
         Color::Rgb(197, 197, 197)
     } else {
-        Color::Rgb(136, 136, 136)
+        Color::Rgb(128, 128, 128)
     };
 
     let block = Block::default()
@@ -279,7 +279,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let border_color = if app.focus == Focus::Player {
         Color::Rgb(197, 197, 197)
     } else {
-        Color::Rgb(136, 136, 136)
+        Color::Rgb(128, 128, 128)
     };
 
     let block = Block::default()

@@ -123,6 +123,16 @@ pub struct App {
     tick_render_cache: TickRenderCache,
     /// Cached sort keys, rebuilt when the queue changes.
     cached_sort_keys: Option<Vec<SortKey>>,
+    /// Last playback state pushed to MPRIS, used to skip redundant DBus calls.
+    last_mpris_playback: Option<MediaPlayback>,
+    /// Path of the track whose metadata was last pushed to MPRIS.
+    last_mpris_metadata_path: Option<PathBuf>,
+    /// Set when a track just started; metadata is re-pushed once duration is
+    /// available from mpv (which loads asynchronously after `loadfile`).
+    mpris_metadata_pending: bool,
+    /// Millisecond timestamp of last position push to MPRIS, used to throttle
+    /// position updates to ~2 Hz so the DBus event channel does not backlog.
+    last_mpris_position_ms: u128,
 }
 
 pub struct TickRenderCache {
@@ -251,6 +261,10 @@ impl App {
                 last_tick_ms: 0,
             },
             cached_sort_keys: None,
+            last_mpris_playback: None,
+            last_mpris_metadata_path: None,
+            mpris_metadata_pending: false,
+            last_mpris_position_ms: 0,
         };
         app.update_folder_items();
         app.folder_tree_state.select(Some(0));
@@ -356,6 +370,11 @@ impl App {
                 self.lastfm_scrobbled = false;
                 self.lastfm_now_playing_sent = false;
                 self.load_track_assets(&path);
+                // Reset playback state cache so the next tick re-pushes the
+                // new status instead of treating it as a no-op.
+                self.last_mpris_playback = None;
+                self.last_mpris_metadata_path = None;
+                self.mpris_metadata_pending = false;
                 self.update_mpris_metadata(&path);
             }
         } else {
@@ -386,6 +405,20 @@ impl App {
             .map(|d| d.as_millis())
             .unwrap_or(0);
         self.update_mpris_playback();
+
+        // mpv loads files asynchronously; duration is unavailable right after
+        // a track switch. Re-push metadata once it becomes known.
+        if self.mpris_metadata_pending {
+            if let Some(idx) = self.current_index {
+                if let Some(item) = &self.queue.get(idx) {
+                    let path = item.path.clone();
+                    if self.player.get_duration().ok().is_some() {
+                        self.update_mpris_metadata(&path);
+                    }
+                }
+            }
+        }
+
         self.check_lastfm_scrobble(pos, dur);
     }
 
@@ -767,6 +800,10 @@ impl App {
                 ..Default::default()
             };
             controls.set_metadata(mpris_meta).ok();
+            self.last_mpris_metadata_path = Some(path.clone());
+            // If duration isn't available yet, mpv is still loading the file;
+            // re-push metadata on a later tick once it's known.
+            self.mpris_metadata_pending = duration.is_none();
         }
     }
 
@@ -785,7 +822,40 @@ impl App {
             } else {
                 MediaPlayback::Playing { progress: position }
             };
-            controls.set_playback(status).ok();
+
+            // Only push full PropertiesChanged when the playback variant
+            // (Stopped / Playing / Paused) changes.  Per-tick position
+            // updates would flood the D-Bus event channel and backlog the
+            // service thread (souvlaki's conn.process blocks for up to 1 s
+            // when no incoming D-Bus traffic arrives).
+            let variant_changed = match (&self.last_mpris_playback, &status) {
+                (Some(MediaPlayback::Stopped), MediaPlayback::Stopped) => false,
+                (Some(MediaPlayback::Paused { .. }), MediaPlayback::Paused { .. }) => false,
+                (Some(MediaPlayback::Playing { .. }), MediaPlayback::Playing { .. }) => false,
+                _ => true,
+            };
+
+            if variant_changed {
+                controls.set_playback(status.clone()).ok();
+                self.last_mpris_playback = Some(status);
+                self.last_mpris_position_ms = 0;
+            } else {
+                // Periodically refresh the stored position so that the
+                // `Position` D-Bus property stays reasonably current.
+                // Rate-limited to ~2 Hz (every 500 ms).
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                if now_ms.saturating_sub(self.last_mpris_position_ms) >= 500 {
+                    // Set the playback status with the updated progress
+                    // to refresh the internal state. This produces a
+                    // PropertiesChanged signal even though the status
+                    // string is identical.
+                    controls.set_playback(status).ok();
+                    self.last_mpris_position_ms = now_ms;
+                }
+            }
         }
     }
 
