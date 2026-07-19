@@ -1,0 +1,35 @@
+# Audino Theme Configuration
+# Colors can be specified as:
+#   - RGB: r, g, b (e.g., "197, 197, 197")
+#   - Hex: #rrggbb (e.g., "#c5c5c5")
+
+# Folder tree colors
+folder_selected = 197, 197, 197
+folder_normal = 136, 136, 136
+
+# Queue colors
+queue_current = 197, 197, 197
+queue_played = 68, 68, 68
+queue_normal = 136, 136, 136
+
+# Border colors (focused/unfocused)
+border_focused = 197, 197, 197
+border_unfocused = 128, 128, 128
+
+# Player bar
+title_fg = 197, 197, 197
+
+# Progress bar
+progress_filled = 136, 136, 136
+progress_empty = 51, 51, 51
+
+# Lyrics
+lyric_active = 197, 197, 197
+lyric_inactive = 68, 68, 68
+
+# Moving track highlight
+moving_track_bg = 50, 50, 50
+moving_track_fg = 255, 255, 255
+
+# Queue controls (selected state)
+controls_selected = 197, 197, 197

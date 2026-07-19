@@ -1,13 +1,17 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    style::{Color, Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     Frame,
 };
 use crate::app::{App, CachedFolderEntry, CachedQueueEntry, Focus};
+use crate::theme::global_theme;
 
 pub fn render(f: &mut Frame, app: &mut App) {
+    let theme = global_theme();
+    let colors = &theme.colors;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -32,21 +36,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ])
         .split(main_chunks[1]);
 
-    render_folder_tree(f, app, main_chunks[0]);
-    render_queue(f, app, queue_chunks[0]);
-    render_queue_controls(f, app, queue_chunks[1]);
-    render_player_bar(f, app, chunks[1]);
+    render_folder_tree(f, app, main_chunks[0], colors);
+    render_queue(f, app, queue_chunks[0], colors);
+    render_queue_controls(f, app, queue_chunks[1], colors);
+    render_player_bar(f, app, chunks[1], colors);
 }
 
-const STYLE_FOLDER_SELECTED: Style = Style::new()
-    .fg(Color::Rgb(197, 197, 197))
-    .add_modifier(Modifier::BOLD);
-const STYLE_FOLDER_NORMAL: Style = Style::new().fg(Color::Rgb(136, 136, 136));
-const STYLE_QUEUE_CURRENT: Style = STYLE_FOLDER_SELECTED;
-const STYLE_QUEUE_PLAYED: Style = Style::new().fg(Color::Rgb(68, 68, 68));
-const STYLE_QUEUE_NORMAL: Style = STYLE_FOLDER_NORMAL;
-
-fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
+fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
     let need_rebuild = app.folder_items_cache.is_none()
         || app.folder_items_dirty
         || app.folder_items_cache_area != Some((area.width, area.height));
@@ -73,9 +69,9 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
         .enumerate()
         .map(|(i, entry)| {
             let style = if i == app.selected_folder_index {
-                STYLE_FOLDER_SELECTED
+                colors.folder_selected_style()
             } else {
-                STYLE_FOLDER_NORMAL
+                colors.folder_normal_style()
             };
             let prefix = if entry.is_dir { "▸ " } else { "  " };
             let mut line = String::with_capacity(prefix.len() + entry.name.len());
@@ -85,11 +81,7 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    let border_color = if app.focus == Focus::Tree {
-        Color::Rgb(197, 197, 197)
-    } else {
-        Color::Rgb(128, 128, 128)
-    };
+    let focused = app.focus == Focus::Tree;
 
     let title = if app.is_searching {
         format!(" Folder Tree (Search: {}) ", app.search_query)
@@ -100,13 +92,13 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(border_color));
+        .border_style(colors.border_style(focused));
 
     let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, &mut app.folder_tree_state);
 }
 
-fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
+fn render_queue(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
     let need_rebuild = app.queue_items_cache.is_none()
         || app.queue_items_dirty
         || app.queue_items_cache_area != Some((area.width, area.height));
@@ -157,19 +149,16 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         .enumerate()
         .map(|(i, entry)| {
             let mut style = if Some(i) == app.current_index {
-                STYLE_QUEUE_CURRENT
+                colors.queue_current_style()
             } else if app.current_index.map_or(false, |curr| i < curr) {
-                STYLE_QUEUE_PLAYED
+                colors.queue_played_style()
             } else {
-                STYLE_QUEUE_NORMAL
+                colors.queue_normal_style()
             };
 
             if i == app.selected_queue_index && app.focus == Focus::Queue {
                 style = if app.is_moving_track {
-                    Style::new()
-                        .bg(Color::Rgb(50, 50, 50))
-                        .fg(Color::Rgb(255, 255, 255))
-                        .add_modifier(Modifier::BOLD)
+                    colors.moving_track_style()
                 } else {
                     style.add_modifier(Modifier::REVERSED)
                 };
@@ -189,12 +178,6 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    let border_color = if app.focus == Focus::Queue {
-        Color::Rgb(197, 197, 197)
-    } else {
-        Color::Rgb(128, 128, 128)
-    };
-
     let title = if app.is_moving_track {
         " Queue (Moving Track...) "
     } else {
@@ -204,7 +187,7 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(border_color));
+        .border_style(colors.border_style(app.focus == Focus::Queue));
 
     let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, &mut app.queue_state);
@@ -229,20 +212,14 @@ fn truncate(s: &str, max: usize) -> &str {
     s
 }
 
-fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect) {
+fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
     let sort_label = format!(" Sort ({:?}) ", app.sort_method);
     let controls = [" Shuffle ", " Clear ", &sort_label];
-
-    let border_color = if app.focus == Focus::QueueControls {
-        Color::Rgb(197, 197, 197)
-    } else {
-        Color::Rgb(128, 128, 128)
-    };
 
     let block = Block::default()
         .title(" Queue Controls ")
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(border_color));
+        .border_style(colors.border_style(app.focus == Focus::QueueControls));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -257,31 +234,19 @@ fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect) {
         .split(inner_area);
 
     for (i, control) in controls.iter().enumerate() {
-        let style = if i == app.selected_control_index && app.focus == Focus::QueueControls {
-            Style::new()
-                .fg(Color::Rgb(197, 197, 197))
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::REVERSED)
-        } else {
-            STYLE_FOLDER_NORMAL
-        };
+        let selected = i == app.selected_control_index && app.focus == Focus::QueueControls;
+        let style = colors.controls_style(selected);
 
         let p = Paragraph::new(*control).style(style).alignment(Alignment::Center);
         f.render_widget(p, chunks[i]);
     }
 }
 
-fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
-    let border_color = if app.focus == Focus::Player {
-        Color::Rgb(197, 197, 197)
-    } else {
-        Color::Rgb(128, 128, 128)
-    };
-
+fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
     let block = Block::default()
         .title(" Player ")
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(border_color));
+        .border_style(colors.border_style(app.focus == Focus::Player));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -364,10 +329,10 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let meta_text = vec![
         Line::from(Span::styled(
             title,
-            Style::new().fg(Color::Rgb(197, 197, 197)).add_modifier(Modifier::BOLD),
+            colors.title_style(),
         )),
-        Line::from(Span::styled(artist, STYLE_FOLDER_NORMAL)),
-        Line::from(Span::styled(album, STYLE_FOLDER_NORMAL)),
+        Line::from(Span::styled(artist, colors.folder_normal_style())),
+        Line::from(Span::styled(album, colors.folder_normal_style())),
     ];
 
     let meta_paragraph = Paragraph::new(meta_text);
@@ -398,10 +363,10 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let progress_text = vec![
         Line::from(vec![
-            Span::styled(bar_filled, STYLE_FOLDER_NORMAL),
-            Span::styled(bar_empty, Style::new().fg(Color::Rgb(51, 51, 51))),
+            Span::styled(bar_filled, colors.progress_filled_style()),
+            Span::styled(bar_empty, colors.progress_empty_style()),
         ]),
-        Line::from(Span::styled(time_info, STYLE_FOLDER_NORMAL)),
+        Line::from(Span::styled(time_info, colors.folder_normal_style())),
     ];
     f.render_widget(Paragraph::new(progress_text), bar_chunks[2]);
 
@@ -416,13 +381,7 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect) {
         let mut lines = Vec::new();
         for i in (active_index.saturating_sub(2))..=(active_index + 2) {
             if let Some(line) = app.lyrics.get(i) {
-                let style = if i == active_index {
-                    Style::new()
-                        .fg(Color::Rgb(197, 197, 197))
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    STYLE_QUEUE_PLAYED
-                };
+                let style = colors.lyric_style(i == active_index);
                 lines.push(
                     Line::from(Span::styled(line.text.as_str(), style))
                         .alignment(Alignment::Center),

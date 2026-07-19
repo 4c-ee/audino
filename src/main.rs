@@ -3,9 +3,11 @@ mod player;
 mod metadata;
 mod ui;
 mod lyrics;
+mod theme;
 
 use std::{io, time::{Duration, Instant}, path::PathBuf};
 use anyhow::Result;
+use theme::Theme;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -51,6 +53,10 @@ pub fn log(_msg: &str) {}
 
 fn main() -> Result<()> {
     log("Starting audino");
+
+    let theme = Theme::load().unwrap_or_default();
+    theme::set_global_theme(theme);
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
