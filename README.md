@@ -47,9 +47,13 @@ Press Tab to flip between the panels:
      
 Press Q to exit.
 
+## Configuration
+
+Make a config file at `~/.config/audino/audino.conf`. It's simply key=value. An example/default with all of the options can be found at audino.conf.example
+
 ---
 ## DISCLAIMER
-The majority of this code was generated with AI. A _Rust_ ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
+The majority of this code was generated with AI. A Rust ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
 
 You're free to make your own, or use one of many alternatives out there.
 
