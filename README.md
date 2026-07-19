@@ -49,7 +49,9 @@ Press Q to exit.
 
 ## Configuration
 
-Make a config file at `~/.config/audino/audino.conf`. It's simply key=value. An example/default with all of the options can be found at audino.conf.example
+Make a config file at `~/.config/audino/audino.conf`. It's simply key=value. 
+
+An example/default with all of the options can be found at [audino.conf.example](audino.conf.example).
 
 ---
 ## DISCLAIMER
