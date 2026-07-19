@@ -2,6 +2,10 @@
 # Colors can be specified as:
 #   - RGB: r, g, b (e.g., "197, 197, 197")
 #   - Hex: #rrggbb (e.g., "#c5c5c5")
+# Boolean values: true, 1, yes, on (or false, 0, no, off)
+
+# Corner rounding - use rounded box corners instead of sharp corners
+corner_rounding = false
 
 # Folder tree colors
 folder_selected = 197, 197, 197

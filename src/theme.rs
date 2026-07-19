@@ -17,6 +17,16 @@ pub fn set_global_theme(theme: Theme) {
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub colors: ThemeColors,
+    pub corner_rounding: bool,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            colors: ThemeColors::default(),
+            corner_rounding: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,14 +66,6 @@ impl Default for ThemeColors {
             moving_track_bg: Color::Rgb(50, 50, 50),
             moving_track_fg: Color::Rgb(255, 255, 255),
             controls_selected: Color::Rgb(197, 197, 197),
-        }
-    }
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            colors: ThemeColors::default(),
         }
     }
 }
@@ -126,7 +128,13 @@ impl Theme {
             colors.controls_selected = parse_color(v);
         }
 
-        Some(Self { colors })
+        let corner_rounding = pairs
+            .get("corner_rounding")
+            .map(|v| v.trim().to_lowercase())
+            .map(|v| v == "1" || v == "true" || v == "yes" || v == "on")
+            .unwrap_or(false);
+
+        Some(Self { colors, corner_rounding })
     }
 
     fn config_path() -> Option<PathBuf> {

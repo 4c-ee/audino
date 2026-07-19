@@ -5,11 +5,13 @@ use ratatui::{
     text::{Line, Span},
     Frame,
 };
+use ratatui::widgets::BorderType;
 use crate::app::{App, CachedFolderEntry, CachedQueueEntry, Focus};
 use crate::theme::global_theme;
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let theme = global_theme();
+    let corner_rounding = theme.corner_rounding;
     let colors = &theme.colors;
 
     let chunks = Layout::default()
@@ -36,13 +38,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ])
         .split(main_chunks[1]);
 
-    render_folder_tree(f, app, main_chunks[0], colors);
-    render_queue(f, app, queue_chunks[0], colors);
-    render_queue_controls(f, app, queue_chunks[1], colors);
-    render_player_bar(f, app, chunks[1], colors);
+    render_folder_tree(f, app, main_chunks[0], colors, corner_rounding);
+    render_queue(f, app, queue_chunks[0], colors, corner_rounding);
+    render_queue_controls(f, app, queue_chunks[1], colors, corner_rounding);
+    render_player_bar(f, app, chunks[1], colors, corner_rounding);
 }
 
-fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
+fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
     let need_rebuild = app.folder_items_cache.is_none()
         || app.folder_items_dirty
         || app.folder_items_cache_area != Some((area.width, area.height));
@@ -89,16 +91,19 @@ fn render_folder_tree(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::
         " Folder Tree ".to_string()
     };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(colors.border_style(focused));
+    if corner_rounding {
+        block = block.border_type(BorderType::Rounded);
+    }
 
     let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, &mut app.folder_tree_state);
 }
 
-fn render_queue(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
+fn render_queue(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
     let need_rebuild = app.queue_items_cache.is_none()
         || app.queue_items_dirty
         || app.queue_items_cache_area != Some((area.width, area.height));
@@ -184,10 +189,13 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme:
         " Queue "
     };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(colors.border_style(app.focus == Focus::Queue));
+    if corner_rounding {
+        block = block.border_type(BorderType::Rounded);
+    }
 
     let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, &mut app.queue_state);
@@ -212,14 +220,17 @@ fn truncate(s: &str, max: usize) -> &str {
     s
 }
 
-fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
+fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
     let sort_label = format!(" Sort ({:?}) ", app.sort_method);
     let controls = [" Shuffle ", " Clear ", &sort_label];
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(" Queue Controls ")
         .borders(Borders::ALL)
         .border_style(colors.border_style(app.focus == Focus::QueueControls));
+    if corner_rounding {
+        block = block.border_type(BorderType::Rounded);
+    }
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -242,11 +253,14 @@ fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crat
     }
 }
 
-fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors) {
-    let block = Block::default()
+fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
+    let mut block = Block::default()
         .title(" Player ")
         .borders(Borders::ALL)
         .border_style(colors.border_style(app.focus == Focus::Player));
+    if corner_rounding {
+        block = block.border_type(BorderType::Rounded);
+    }
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
