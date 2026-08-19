@@ -5,7 +5,7 @@ mod ui;
 mod lyrics;
 mod theme;
 
-use std::{io, time::{Duration, Instant}, path::PathBuf};
+use std::{io, thread, time::{Duration, Instant}, path::PathBuf};
 use anyhow::Result;
 use theme::Theme;
 use crossterm::{
@@ -84,16 +84,19 @@ fn main() -> Result<()> {
     let tick_rate = Duration::from_millis(100);
     let res = run_app(&mut terminal, &mut app, tick_rate);
 
-    app.metadata.flush().ok();
-
-    // Restore terminal
-    disable_raw_mode()?;
+    // Restore terminal before any blocking I/O so the shell is usable immediately
+    disable_raw_mode().ok();
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    ).ok();
+    terminal.show_cursor().ok();
+
+    // Flush metadata cache in a background thread so it doesn't delay the restore
+    thread::spawn(move || {
+        let _ = app.metadata.flush();
+    });
 
     if let Err(err) = res {
         println!("{:?}", err);
@@ -106,7 +109,7 @@ fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     tick_rate: Duration,
-) -> Result<()> 
+) -> Result<()>
 where B::Error: std::error::Error + Send + Sync + 'static
 {
     let mut last_tick = Instant::now();
@@ -176,7 +179,7 @@ where B::Error: std::error::Error + Send + Sync + 'static
                         Focus::Tree | Focus::Queue | Focus::QueueControls => app.move_up(),
                         Focus::Player => {
                             let vol = app.player.get_volume().unwrap_or(100.0);
-                            app.player.set_volume((vol + 5.0).min(100.0)).ok();
+                            app.player.set_volume((vol + 5.0).min(200.0)).ok();
                         }
                     },
                     KeyCode::Down => match app.focus {

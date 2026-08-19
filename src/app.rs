@@ -11,6 +11,7 @@ use ratatui::widgets::ListState;
 use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
 };
+use rand::seq::SliceRandom;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Focus {
@@ -27,13 +28,11 @@ pub enum SortMethod {
     Album,
     Title,
     Added,
+    Shuffle,
 }
 
 use crate::metadata::TrackMetadata;
 
-/// Maximum pixel dimensions for in-memory album art. The picker downscales
-/// per cell at render time. 1024×1024 RGBA = 4MB, sharp even on high-DPI
-/// terminals.
 const ART_MAX_DIM: u32 = 1024;
 
 #[derive(Debug, Clone)]
@@ -49,14 +48,12 @@ impl QueueItem {
     }
 }
 
-/// Cached folder entry: rendered as a `▸ name` or `  name` line.
 #[derive(Clone)]
 pub struct CachedFolderEntry {
     pub is_dir: bool,
     pub name: String,
 }
 
-/// Cached queue row: the strings we display, pre-formatted once.
 #[derive(Clone)]
 pub struct CachedQueueEntry {
     pub track_str: String,
@@ -94,31 +91,17 @@ pub struct App {
     pub placeholder_img: Arc<image::DynamicImage>,
     pub controls: Option<MediaControls>,
     pub mpris_rx: Receiver<MediaControlEvent>,
-    /// Tracks if folder_items Vec needs rebuild before next draw.
     pub folder_items_dirty: bool,
-    /// Tracks if queue Vec needs rebuild before next queue draw.
     pub queue_items_dirty: bool,
-    /// Cached folder entry strings. Rebuilt when folder_items_dirty is set
-    /// or when the render area size changes.
     pub folder_items_cache: Option<Vec<CachedFolderEntry>>,
     pub folder_items_cache_area: Option<(u16, u16)>,
-    /// Cached queue row strings. Rebuilt when queue_items_dirty is set
-    /// or when the render area size changes.
     pub queue_items_cache: Option<Vec<CachedQueueEntry>>,
     pub queue_items_cache_area: Option<(u16, u16)>,
     tick_render_cache: TickRenderCache,
-    /// Cached sort keys, rebuilt when the queue changes.
-    cached_sort_keys: Option<Vec<SortKey>>,
-    /// Last playback state pushed to MPRIS, used to skip redundant DBus calls.
-    last_mpris_playback: Option<MediaPlayback>,
-    /// Path of the track whose metadata was last pushed to MPRIS.
-    last_mpris_metadata_path: Option<PathBuf>,
-    /// Set when a track just started; metadata is re-pushed once duration is
-    /// available from mpv (which loads asynchronously after `loadfile`).
-    mpris_metadata_pending: bool,
-    /// Millisecond timestamp of last position push to MPRIS, used to throttle
-    /// position updates to ~2 Hz so the DBus event channel does not backlog.
-    last_mpris_position_ms: u128,
+    pub last_mpris_playback: Option<MediaPlayback>,
+    pub last_mpris_metadata_path: Option<PathBuf>,
+    pub mpris_metadata_pending: bool,
+    pub last_mpris_position_ms: u128,
 }
 
 pub struct TickRenderCache {
@@ -126,43 +109,6 @@ pub struct TickRenderCache {
     pub duration: f64,
     pub volume: f64,
     pub last_tick_ms: u128,
-}
-
-#[derive(Clone)]
-struct SortKey {
-    primary: String,
-    track_num: u32,
-    secondary: String,
-    tertiary: String,
-    quaternary: String,
-    name: String,
-    id: usize,
-}
-
-impl Ord for SortKey {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.primary
-            .cmp(&other.primary)
-            .then(self.track_num.cmp(&other.track_num))
-            .then(self.secondary.cmp(&other.secondary))
-            .then(self.tertiary.cmp(&other.tertiary))
-            .then(self.quaternary.cmp(&other.quaternary))
-            .then(self.name.cmp(&other.name))
-            .then(self.id.cmp(&other.id))
-    }
-}
-
-impl PartialOrd for SortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Eq for SortKey {}
-impl PartialEq for SortKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == std::cmp::Ordering::Equal
-    }
 }
 
 impl App {
@@ -230,7 +176,6 @@ impl App {
                 volume: 100.0,
                 last_tick_ms: 0,
             },
-            cached_sort_keys: None,
             last_mpris_playback: None,
             last_mpris_metadata_path: None,
             mpris_metadata_pending: false,
@@ -248,7 +193,6 @@ impl App {
                 self.queue.push(QueueItem::new(path, self.next_id, meta));
                 self.next_id += 1;
                 self.queue_items_dirty = true;
-                self.cached_sort_keys = None;
             }
         } else if path.is_dir() {
             let mut items = Vec::new();
@@ -287,7 +231,6 @@ impl App {
                 self.next_id += 1;
             }
             self.queue_items_dirty = true;
-            self.cached_sort_keys = None;
         }
     }
 
@@ -338,8 +281,6 @@ impl App {
             } else {
                 self.current_index = Some(index);
                 self.load_track_assets(&path);
-                // Reset playback state cache so the next tick re-pushes the
-                // new status instead of treating it as a no-op.
                 self.last_mpris_playback = None;
                 self.last_mpris_metadata_path = None;
                 self.mpris_metadata_pending = false;
@@ -393,11 +334,17 @@ impl App {
         }
         if art_path.is_none() {
             if let Some(parent) = path.parent() {
-                for ext in &["png", "jpg", "jpeg", "webp"] {
-                    let cover_path = parent.join(format!("cover.{}", ext));
-                    if cover_path.exists() {
-                        art_path = Some(cover_path);
-                        break;
+                if let Ok(entries) = std::fs::read_dir(parent) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let fname = entry.file_name();
+                        let name = fname.to_string_lossy().to_lowercase();
+                        if name.starts_with("cover.") {
+                            let ext = name.strip_prefix("cover.").unwrap_or("");
+                            if ["png", "jpg", "jpeg", "webp"].contains(&ext) {
+                                art_path = Some(entry.path());
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -457,7 +404,6 @@ impl App {
                         } else if Some(self.selected_queue_index - 1) == self.current_index {
                             self.current_index = Some(self.selected_queue_index);
                         }
-                        self.cached_sort_keys = None;
                         self.queue_items_dirty = true;
                     }
                     self.selected_queue_index -= 1;
@@ -490,7 +436,6 @@ impl App {
                         } else if Some(self.selected_queue_index + 1) == self.current_index {
                             self.current_index = Some(self.selected_queue_index);
                         }
-                        self.cached_sort_keys = None;
                         self.queue_items_dirty = true;
                     }
                     self.selected_queue_index += 1;
@@ -523,23 +468,21 @@ impl App {
             }
             self.queue_state.select(Some(self.selected_queue_index));
             self.queue_items_dirty = true;
-            self.cached_sort_keys = None;
         }
     }
 
-    pub fn shuffle_queue(&mut self) {
-        use rand::seq::SliceRandom;
-        let mut rng = rand::rng();
+    pub fn activate_shuffle(&mut self) {
+        self.sort_method = SortMethod::Shuffle;
+        self.shuffle_future();
+    }
 
-        if let Some(curr) = self.current_index {
-            if curr + 1 < self.queue.len() {
-                let (_, next_up) = self.queue.split_at_mut(curr + 1);
-                next_up.shuffle(&mut rng);
-            }
-        } else {
-            self.queue.shuffle(&mut rng);
+    fn shuffle_future(&mut self) {
+        if self.queue.is_empty() {
+            return;
         }
-        self.cached_sort_keys = None;
+        let mut rng = rand::rng();
+        let split = self.current_index.map(|i| i + 1).unwrap_or(0);
+        self.queue[split..].shuffle(&mut rng);
         self.queue_items_dirty = true;
     }
 
@@ -557,88 +500,93 @@ impl App {
         }
         self.queue_state.select(Some(self.selected_queue_index));
         self.queue_items_dirty = true;
-        self.cached_sort_keys = None;
     }
 
     pub fn cycle_sort_method(&mut self) {
         self.sort_method = match self.sort_method {
-            SortMethod::Added => SortMethod::Track,
-            SortMethod::Track => SortMethod::Artist,
+            SortMethod::Added  => SortMethod::Track,
+            SortMethod::Track  => SortMethod::Artist,
             SortMethod::Artist => SortMethod::Album,
-            SortMethod::Album => SortMethod::Title,
-            SortMethod::Title => SortMethod::Added,
+            SortMethod::Album  => SortMethod::Title,
+            SortMethod::Title  => SortMethod::Shuffle,
+            SortMethod::Shuffle => SortMethod::Added,
         };
         self.apply_sort();
+    }
+
+    fn str_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+        a.cmp(b)
     }
 
     pub fn apply_sort(&mut self) {
         let current_id = self.current_index.and_then(|i| self.queue.get(i).map(|it| it.id));
 
-        let keys = self.build_sort_keys();
-        let mut indices: Vec<usize> = (0..self.queue.len()).collect();
-        indices.sort_by(|&a, &b| keys[a].cmp(&keys[b]));
-        let new_queue: Vec<QueueItem> = indices.iter().map(|&i| self.queue[i].clone()).collect();
-        self.queue = new_queue;
-        // keys still align by index since both are reordered identically
-        self.cached_sort_keys = Some(keys);
+        match self.sort_method {
+            SortMethod::Shuffle => self.shuffle_future(),
+            _ => {
+                let split = self.current_index.map(|i| i + 1).unwrap_or(0);
+                self.queue[split..].sort_by(|a, b| match self.sort_method {
+                    SortMethod::Added  => a.id.cmp(&b.id),
+                    SortMethod::Track  => Self::str_cmp(
+                        &a.meta.track_number.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.track_number.as_deref().unwrap_or("").to_lowercase(),
+                    )
+                    .then(Self::str_cmp(
+                        &a.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                    ))
+                    .then(Self::str_cmp(
+                        &a.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                    )),
+                    SortMethod::Artist => Self::str_cmp(
+                        &a.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                    )
+                    .then(Self::str_cmp(
+                        &a.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                    ))
+                    .then(Self::str_cmp(
+                        &a.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                    )),
+                    SortMethod::Album  => Self::str_cmp(
+                        &a.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                    )
+                    .then(Self::str_cmp(
+                        &a.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                    ))
+                    .then(Self::str_cmp(
+                        &a.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                    )),
+                    SortMethod::Title  => Self::str_cmp(
+                        &a.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.title.as_deref().unwrap_or("").to_lowercase(),
+                    )
+                    .then(Self::str_cmp(
+                        &a.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.artist.as_deref().unwrap_or("").to_lowercase(),
+                    ))
+                    .then(Self::str_cmp(
+                        &a.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                        &b.meta.album.as_deref().unwrap_or("").to_lowercase(),
+                    )),
+                    SortMethod::Shuffle => unreachable!(),
+                });
+            }
+        }
 
         if let Some(id) = current_id {
             self.current_index = self.queue.iter().position(|it| it.id == id);
         }
         self.queue_items_dirty = true;
-    }
-
-    fn build_sort_keys(&self) -> Vec<SortKey> {
-        if let Some(keys) = &self.cached_sort_keys {
-            if keys.len() == self.queue.len() {
-                return keys.clone();
-            }
-        }
-        self.queue
-            .iter()
-            .map(|item| {
-                let track_str = item.meta.track_number.clone().unwrap_or_default();
-                let track_num = item
-                    .meta
-                    .track_number
-                    .as_deref()
-                    .and_then(|t| t.split('/').next())
-                    .and_then(|t| t.parse::<u32>().ok())
-                    .unwrap_or(u32::MAX);
-
-                let title = item.meta.title.as_deref().unwrap_or("").to_lowercase();
-                let artist = item.meta.artist.as_deref().unwrap_or("").to_lowercase();
-                let album = item.meta.album.as_deref().unwrap_or("").to_lowercase();
-                let name = item
-                    .path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-                    .to_lowercase();
-
-                let (primary, secondary, tertiary) = match self.sort_method {
-                    SortMethod::Added => (String::new(), String::new(), String::new()),
-                    SortMethod::Track => (track_str.to_lowercase(), artist.clone(), album.clone()),
-                    SortMethod::Artist => (artist, album.clone(), title.clone()),
-                    SortMethod::Album => (album, artist.clone(), title.clone()),
-                    SortMethod::Title => (title, artist.clone(), album.clone()),
-                };
-                SortKey {
-                    primary,
-                    track_num,
-                    secondary,
-                    tertiary,
-                    quaternary: String::new(),
-                    name,
-                    id: item.id,
-                }
-            })
-            .collect()
-    }
-
-    pub fn execute_selected_control(&mut self) {
+    }pub fn execute_selected_control(&mut self) {
         match self.selected_control_index {
-            0 => self.shuffle_queue(),
+            0 => self.activate_shuffle(),
             1 => self.clear_queue(),
             2 => self.cycle_sort_method(),
             _ => {}
@@ -676,6 +624,9 @@ impl App {
     }
 
     pub fn next_focus(&mut self) {
+        if self.is_moving_track {
+            self.is_moving_track = false;
+        }
         self.focus = match self.focus {
             Focus::Tree => Focus::Queue,
             Focus::Queue => Focus::QueueControls,
@@ -724,8 +675,6 @@ impl App {
             };
             controls.set_metadata(mpris_meta).ok();
             self.last_mpris_metadata_path = Some(path.clone());
-            // If duration isn't available yet, mpv is still loading the file;
-            // re-push metadata on a later tick once it's known.
             self.mpris_metadata_pending = duration.is_none();
         }
     }
@@ -746,11 +695,6 @@ impl App {
                 MediaPlayback::Playing { progress: position }
             };
 
-            // Only push full PropertiesChanged when the playback variant
-            // (Stopped / Playing / Paused) changes.  Per-tick position
-            // updates would flood the D-Bus event channel and backlog the
-            // service thread (souvlaki's conn.process blocks for up to 1 s
-            // when no incoming D-Bus traffic arrives).
             let variant_changed = match (&self.last_mpris_playback, &status) {
                 (Some(MediaPlayback::Stopped), MediaPlayback::Stopped) => false,
                 (Some(MediaPlayback::Paused { .. }), MediaPlayback::Paused { .. }) => false,
@@ -763,18 +707,11 @@ impl App {
                 self.last_mpris_playback = Some(status);
                 self.last_mpris_position_ms = 0;
             } else {
-                // Periodically refresh the stored position so that the
-                // `Position` D-Bus property stays reasonably current.
-                // Rate-limited to ~2 Hz (every 500 ms).
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis())
                     .unwrap_or(0);
                 if now_ms.saturating_sub(self.last_mpris_position_ms) >= 500 {
-                    // Set the playback status with the updated progress
-                    // to refresh the internal state. This produces a
-                    // PropertiesChanged signal even though the status
-                    // string is identical.
                     controls.set_playback(status).ok();
                     self.last_mpris_position_ms = now_ms;
                 }
@@ -841,9 +778,6 @@ impl App {
     }
 }
 
-/// Resize an image so its largest dimension is at most `ART_MAX_DIM`.
-/// Caps in-memory album art at ~4MB worst case (1024x1024 RGBA) while still
-/// leaving the picker enough source pixels to downscale sharply per cell.
 fn pre_resize_for_art(_picker: &Picker, img: &image::DynamicImage) -> image::DynamicImage {
     if img.width() <= ART_MAX_DIM && img.height() <= ART_MAX_DIM {
         return img.clone();

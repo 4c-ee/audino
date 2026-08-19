@@ -221,7 +221,11 @@ fn truncate(s: &str, max: usize) -> &str {
 }
 
 fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
-    let sort_label = format!(" Sort ({:?}) ", app.sort_method);
+    let sort_label_str = match app.sort_method {
+        crate::app::SortMethod::Shuffle => String::from("Shuffle"),
+        other => format!("{:?}", other),
+    };
+    let sort_label = format!(" Sort ({}) ", sort_label_str);
     let controls = [" Shuffle ", " Clear ", &sort_label];
 
     let mut block = Block::default()
