@@ -12,14 +12,14 @@ Jokes aside, it's a visually minimalist, sorta-not-really-feature-rich, TUI musi
 - Queue, for managing the next and previously played songs. Comes with an extra not-really-panel for shuffle/clear/sort.
 - Player, which shows cover art, metadata, progress, and lyrics if applicable.
 
-Audino is intended to push past the strange keybinds, outdated format support, un-gapless playback,and other issues that plague TUI music players to this day.
+Audino is intended to push past the strange keybinds, outdated format support, and other issues that plague TUI music players to this day.
 
 It looks like this:
 <img src="assets/preview.png">
 <h6>uses terminal font, pictured is <a href="https://github.com/qwerasd205/PixelCode">pixel code</a></h6>
 
 ## Installation/Usage
-Unfortunately even with the wondrous power of AI, I'm scared and clueless and afraid as to releasing and packaging an application. So, in order to install this, you're gonna need to build it yourself:
+Unfortunately even with the wondrous power of AI, releasing and packaging an application escapes me. So, in order to install this, you're gonna need to build it yourself:
 
 1. Clone the repo: `git clone git@github.com:4c-ee/audino.git`
 OR **download the source code from the releases for a stable version**, I'll try not to leave stuff completely unfinished for too long though lol
@@ -27,7 +27,7 @@ OR **download the source code from the releases for a stable version**, I'll try
 2. Make sure you have cargo installed (usually supplied by the `rust` package) and your working directory is the place you extracted it
 3. Run `cargo build -r`
 4. Move the built binary from `target/release/audino` to `/usr/sbin/` (may need sudo) or wherever most of your commands are in
-5. Then run audino from anywhere!! It will default to ~/Music, but you can back out of that. No you can't change that default opening directory why do you ask
+5. Then run audino from anywhere!! It will default to ~/Music, but you can back out of that. No you can't change that default opening directory why do you ask (it's planned)
 
 To use it, run `audino` from your terminal. 
 
