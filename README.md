@@ -27,7 +27,7 @@ OR **download the source code from the releases for a stable version**, I'll try
 2. Make sure you have cargo installed (usually supplied by the `rust` package) and your working directory is the place you extracted it
 3. Run `cargo build -r`
 4. Move the built binary from `target/release/audino` to `/usr/sbin/` (may need sudo) or wherever most of your commands are in
-5. Then run audino from anywhere!! It will default to ~/Music, but you can back out of that. No you can't change that default opening directory why do you ask (it's planned)
+5. Then run audino from anywhere!! It will default to ~/Music. You can change the default opening directory with `library_path` in `audino.conf`. See more in [audino.conf.example](audino.conf.example).
 
 To use it, run `audino` from your terminal. 
 

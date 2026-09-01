@@ -4,6 +4,10 @@
 #   - Hex: #rrggbb (e.g., "#c5c5c5")
 # Boolean values: true, 1, yes, on (or false, 0, no, off)
 
+# Default opening directory ("~" expands to your home directory)
+# Can be overridden by the -p flag
+library_path = ~/Music
+
 # Corner rounding - use rounded box corners instead of sharp corners
 corner_rounding = false
 

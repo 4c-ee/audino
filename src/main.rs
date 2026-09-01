@@ -51,6 +51,13 @@ pub fn log(msg: &str) {
 #[cfg(not(debug_assertions))]
 pub fn log(_msg: &str) {}
 
+fn expand_tilde(path: &str) -> PathBuf {
+    if let (Some(rest), Ok(home)) = (path.strip_prefix("~/"), std::env::var("HOME")) {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
+}
+
 fn main() -> Result<()> {
     log("Starting audino");
 
@@ -75,10 +82,12 @@ fn main() -> Result<()> {
         }
     }
 
-    let library_path = library_path.unwrap_or_else(|| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join("Music")
-    });
+    let library_path = library_path
+        .or_else(|| theme::config_value("library_path").map(|v| expand_tilde(&v)))
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join("Music")
+        });
     let mut app = App::new(library_path);
 
     let tick_rate = Duration::from_millis(100);

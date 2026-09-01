@@ -14,6 +14,18 @@ pub fn set_global_theme(theme: Theme) {
     let _ = CURRENT_THEME.set(theme);
 }
 
+pub fn config_value(key: &str) -> Option<String> {
+    let config_path = Theme::config_path()?;
+    if !config_path.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(&config_path).ok()?;
+    parse_kv_config(&content)
+        .get(key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub colors: ThemeColors,
