@@ -125,6 +125,7 @@ pub struct App {
     pub last_mpris_metadata_path: Option<PathBuf>,
     pub mpris_metadata_pending: bool,
     pub last_mpris_position_ms: u128,
+    pub last_mpris_volume: Option<f64>,
 }
 
 pub struct TickRenderCache {
@@ -206,6 +207,7 @@ impl App {
             last_mpris_metadata_path: None,
             mpris_metadata_pending: false,
             last_mpris_position_ms: 0,
+            last_mpris_volume: None,
         };
         app.update_folder_items();
         app.folder_tree_state.select(Some(0));
@@ -348,6 +350,7 @@ impl App {
         self.tick_render_cache.duration = dur;
         self.tick_render_cache.volume = vol;
         self.update_mpris_playback();
+        self.update_mpris_volume(vol);
 
         if self.mpris_metadata_pending {
             if let Some(idx) = self.current_index {
@@ -693,6 +696,16 @@ impl App {
         }
     }
 
+    /// Keep the MPRIS Volume property (0.0-1.0) in sync with the mpv volume (0-200).
+    pub fn update_mpris_volume(&mut self, vol: f64) {
+        if let Some(ref mut controls) = self.controls {
+            if self.last_mpris_volume != Some(vol) {
+                controls.set_volume((vol / 100.0).min(1.0)).ok();
+                self.last_mpris_volume = Some(vol);
+            }
+        }
+    }
+
     pub fn update_mpris_playback(&mut self) {
         if let Some(ref mut controls) = self.controls {
             let position = self
@@ -766,6 +779,10 @@ impl App {
                 }
                 MediaControlEvent::Stop => {
                     self.player.pause(true).ok();
+                }
+                MediaControlEvent::SetVolume(v) => {
+                    // MPRIS volume is 0.0-1.0; mpv volume is 0-200.
+                    self.player.set_volume((v * 100.0).clamp(0.0, 200.0)).ok();
                 }
                 MediaControlEvent::Seek(direction) => {
                     let offset = match direction {
