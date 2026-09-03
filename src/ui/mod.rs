@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 use ratatui::widgets::BorderType;
+use std::borrow::Cow;
 use crate::app::{App, CachedFolderEntry, CachedQueueEntry, Focus};
 use crate::theme::global_theme;
 
@@ -204,20 +205,31 @@ fn render_queue(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme:
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
-fn truncate(s: &str, max: usize) -> &str {
-    let width = s.width();
-    if width <= max {
-        return s;
+/// Truncates `s` to at most `max` display width, appending `...` if it was
+/// truncated. The ellipsis is accounted for within `max`.
+fn truncate(s: &str, max: usize) -> Cow<'_, str> {
+    if s.width() <= max {
+        return Cow::Borrowed(s);
     }
+    const ELLIPSIS: &str = "...";
+    if max <= ELLIPSIS.width() {
+        return Cow::Owned(ELLIPSIS.chars().take(max).collect());
+    }
+    let budget = max - ELLIPSIS.width();
     let mut used = 0;
+    let mut end = 0; // byte index one past the last char that fits
     for (idx, ch) in s.char_indices() {
         let w = ch.width().unwrap_or(0);
-        if used + w > max {
-            return &s[..idx];
+        if used + w > budget {
+            break;
         }
+        end = idx + ch.len_utf8();
         used += w;
     }
-    s
+    let mut out = String::with_capacity(end + ELLIPSIS.len());
+    out.push_str(&s[..end]);
+    out.push_str(ELLIPSIS);
+    Cow::Owned(out)
 }
 
 fn render_queue_controls(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::theme::ThemeColors, corner_rounding: bool) {
@@ -417,4 +429,45 @@ fn render_player_bar(f: &mut Frame, app: &mut App, area: Rect, colors: &crate::t
         .wrap(Wrap { trim: true })
         .alignment(Alignment::Center);
     f.render_widget(lyric_paragraph, chunks[2]);
+}
+#[cfg(test)]
+mod truncate_tests {
+    use super::truncate;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn short_string_unchanged() {
+        assert_eq!(truncate("hello", 20).as_ref(), "hello");
+        assert_eq!(truncate("hello", 5).as_ref(), "hello");
+        assert_eq!(truncate("", 5).as_ref(), "");
+    }
+
+    #[test]
+    fn long_string_gets_ellipsis_and_fits() {
+        let out = truncate("hello world", 8);
+        assert_eq!(out.as_ref(), "hello...");
+        assert_eq!(out.width(), 8);
+    }
+
+    #[test]
+    fn ellipsis_is_accounted_for() {
+        let out = truncate("abcdefghijklmnop", 10);
+        assert_eq!(out.as_ref(), "abcdefg...");
+        assert_eq!(out.width(), 10);
+    }
+
+    #[test]
+    fn very_small_max_clips_ellipsis() {
+        assert_eq!(truncate("hello", 0).as_ref(), "");
+        assert_eq!(truncate("hello", 2).as_ref(), "..");
+        assert_eq!(truncate("hello", 3).as_ref(), "...");
+    }
+
+    #[test]
+    fn wide_chars_respected() {
+        // CJK chars are 2 columns wide each.
+        let out = truncate("日本語の曲", 7); // 10 cols -> budget 4 -> "日本" + "..." = 7
+        assert_eq!(out.as_ref(), "日本...");
+        assert_eq!(out.width(), 7);
+    }
 }
