@@ -9,7 +9,7 @@ use std::{io, thread, time::{Duration, Instant}, path::PathBuf};
 use anyhow::Result;
 use theme::Theme;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -33,7 +33,10 @@ static LOG_FILE: Mutex<Option<BufWriter<std::fs::File>>> = Mutex::new(None);
 pub fn log(msg: &str) {
     let mut guard = LOG_FILE.lock().expect("LOG_FILE poisoned");
     if guard.is_none() {
-        if let Ok(file) = OpenOptions::new().create(true).append(true).open("audino.log") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let dir = PathBuf::from(home).join(".cache").join("audino");
+        std::fs::create_dir_all(&dir).ok();
+        if let Ok(file) = OpenOptions::new().create(true).append(true).open(dir.join("audino.log")) {
             *guard = Some(BufWriter::new(file));
         }
     }
@@ -44,12 +47,25 @@ pub fn log(msg: &str) {
             Instant::now().elapsed().as_millis(),
             msg
         );
-        let _ = writer.flush();
     }
 }
 
+/// Logging macro. In debug builds this expands to the `format!` + file write;
+/// in release builds the macro itself expands to nothing, so neither the
+/// formatting nor its arguments are evaluated. Use `crate::log!("{} {}", a, b)`.
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! log {
+    ($($t:tt)*) => {
+        $crate::log(&format!($($t)*));
+    };
+}
+
 #[cfg(not(debug_assertions))]
-pub fn log(_msg: &str) {}
+#[macro_export]
+macro_rules! log {
+    ($($t:tt)*) => {};
+}
 
 fn expand_tilde(path: &str) -> PathBuf {
     if let (Some(rest), Ok(home)) = (path.strip_prefix("~/"), std::env::var("HOME")) {
@@ -59,26 +75,28 @@ fn expand_tilde(path: &str) -> PathBuf {
 }
 
 fn main() -> Result<()> {
-    log("Starting audino");
+    log!("Starting audino");
 
     let theme = Theme::load().unwrap_or_default();
     theme::set_global_theme(theme);
 
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Create app
+    // Parse CLI args before touching the terminal so errors print cleanly
     let mut library_path = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "-p" {
-            if let Some(p) = args.next() {
-                library_path = Some(PathBuf::from(p));
+            match args.next() {
+                Some(p) => library_path = Some(expand_tilde(&p)),
+                None => {
+                    eprintln!("audino: -p requires a path argument");
+                    eprintln!("usage: audino [-p <library-path>]");
+                    std::process::exit(2);
+                }
             }
+        } else {
+            eprintln!("audino: unknown argument: {}", arg);
+            eprintln!("usage: audino [-p <library-path>]");
+            std::process::exit(2);
         }
     }
 
@@ -90,6 +108,14 @@ fn main() -> Result<()> {
         });
     let mut app = App::new(library_path);
 
+    // Setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // Create app
     let tick_rate = Duration::from_millis(100);
     let res = run_app(&mut terminal, &mut app, tick_rate);
 
@@ -97,8 +123,7 @@ fn main() -> Result<()> {
     disable_raw_mode().ok();
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
+        LeaveAlternateScreen
     ).ok();
     terminal.show_cursor().ok();
 

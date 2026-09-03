@@ -16,7 +16,7 @@ pub struct TrackMetadata {
 }
 
 pub fn extract_metadata(path: &Path) -> Result<TrackMetadata> {
-    crate::log(&format!("Extracting metadata for {:?}", path));
+    crate::log!("Extracting metadata for {:?}", path);
     let tagged = lofty::read_from_path(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
@@ -44,7 +44,7 @@ pub fn extract_metadata(path: &Path) -> Result<TrackMetadata> {
 }
 
 pub fn extract_album_art(path: &Path) -> Result<Option<Vec<u8>>> {
-    crate::log(&format!("Extracting album art for {:?}", path));
+    crate::log!("Extracting album art for {:?}", path);
     let tagged = lofty::read_from_path(path)?;
     let tag = match tagged.primary_tag().or_else(|| tagged.first_tag()) {
         Some(t) => t,

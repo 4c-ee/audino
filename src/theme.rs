@@ -192,6 +192,7 @@ fn parse_color(s: &str) -> Color {
             return Color::Rgb(r, g, b);
         }
     }
+    eprintln!("audino: warning: ignoring malformed color {:?}, using default gray", s);
     Color::Rgb(136, 136, 136)
 }
 

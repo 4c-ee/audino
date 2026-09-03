@@ -7,7 +7,7 @@ pub struct Player {
 
 impl Player {
     pub fn new() -> Self {
-        crate::log("Initializing Player with libmpv");
+        crate::log!("Initializing Player with libmpv");
         let mpv = Mpv::new().expect("Failed to initialize mpv");
         
         // Suppress cover art display as requested
@@ -17,18 +17,18 @@ impl Player {
     }
 
     pub fn play(&mut self, path: &str) -> Result<()> {
-        crate::log(&format!("Player: Loading file: {}", path));
+        crate::log!("Player: Loading file: {}", path);
         
         // "replace" will stop current playback and play the new file
         self.mpv.command("loadfile", &[path, "replace"])
             .map_err(|e| anyhow::anyhow!("mpv loadfile error: {}", e))?;
         
-        crate::log("Player: Successfully started playback");
+        crate::log!("Player: Successfully started playback");
         Ok(())
     }
 
     pub fn pause(&self, state: bool) -> Result<()> {
-        crate::log(&format!("Player: Setting pause to {}", state));
+        crate::log!("Player: Setting pause to {}", state);
         self.mpv.set_property("pause", state)
             .map_err(|e| anyhow::anyhow!("mpv set_property pause error: {}", e))?;
         Ok(())
@@ -52,6 +52,12 @@ impl Player {
     pub fn is_empty(&self) -> bool {
         // idle-active is true when mpv has nothing to play and is idling
         self.mpv.get_property::<bool>("idle-active").unwrap_or(true)
+    }
+
+    pub fn stop(&self) -> Result<()> {
+        self.mpv.command("stop", &[])
+            .map_err(|e| anyhow::anyhow!("mpv stop error: {}", e))?;
+        Ok(())
     }
 
     pub fn seek(&self, seconds: f64) -> Result<()> {

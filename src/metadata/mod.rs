@@ -7,9 +7,19 @@ use std::sync::Arc;
 use anyhow::Result;
 pub use lofty::{TrackMetadata, extract_metadata, extract_album_art};
 
+/// A cached track's metadata along with the file state it was extracted from.
+/// If the file's mtime or size no longer match, the entry (and any extracted
+/// album art) is considered stale and re-extracted.
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedTrack {
+    meta: TrackMetadata,
+    mtime_secs: u64,
+    size: u64,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct MetadataCache {
-    pub tracks: HashMap<PathBuf, TrackMetadata>,
+struct MetadataCache {
+    tracks: HashMap<PathBuf, CachedTrack>,
 }
 
 use serde::{Serialize, Deserialize};
@@ -25,6 +35,17 @@ pub struct MetadataProvider {
 
 const SAVE_INTERVAL_MS: u64 = 5000;
 const MIN_CHANGES_BEFORE_SAVE: usize = 10;
+
+fn file_mtime_size(path: &Path) -> Option<(u64, u64)> {
+    let m = fs::metadata(path).ok()?;
+    let mtime_secs = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Some((mtime_secs, m.len()))
+}
 
 impl MetadataProvider {
     pub fn new() -> Self {
@@ -66,13 +87,41 @@ impl MetadataProvider {
         Ok(())
     }
 
+    /// Drop any cached state (metadata + extracted art) for `path` because the
+    /// file changed (or was deleted) since it was cached.
+    fn invalidate(&mut self, path: &Path) {
+        self.cache.tracks.remove(path);
+        let art_path = self.get_album_art_path(path);
+        if art_path.exists() {
+            fs::remove_file(&art_path).ok();
+        }
+        self.dirty = true;
+        self.unsaved_changes += 1;
+    }
+
     pub fn get_metadata(&mut self, path: &Path) -> Result<Arc<TrackMetadata>> {
-        if let Some(meta) = self.cache.tracks.get(path) {
-            return Ok(Arc::new(meta.clone()));
+        if let Some(entry) = self.cache.tracks.get(path) {
+            match file_mtime_size(path) {
+                Some(st) if st == (entry.mtime_secs, entry.size) => {
+                    return Ok(Arc::new(entry.meta.clone()));
+                }
+                _ => {
+                    // File changed or vanished: discard stale metadata and art.
+                    self.invalidate(path);
+                }
+            }
         }
 
         let meta = Arc::new(extract_metadata(path)?);
-        self.cache.tracks.insert(path.to_path_buf(), (*meta).clone());
+        let st = file_mtime_size(path).unwrap_or((0, 0));
+        self.cache.tracks.insert(
+            path.to_path_buf(),
+            CachedTrack {
+                meta: (*meta).clone(),
+                mtime_secs: st.0,
+                size: st.1,
+            },
+        );
         self.dirty = true;
         self.unsaved_changes += 1;
         if self.should_save() {
@@ -100,10 +149,20 @@ impl MetadataProvider {
         self.art_cache_dir.join(format!("{:x}.img", hash))
     }
 
-    pub fn get_or_extract_album_art(&self, audio_path: &Path) -> Result<Option<PathBuf>> {
+    pub fn get_or_extract_album_art(&mut self, audio_path: &Path) -> Result<Option<PathBuf>> {
         let art_path = self.get_album_art_path(audio_path);
         if art_path.exists() {
-            return Ok(Some(art_path));
+            // Drop cached art if the source file changed since it was cached.
+            if let Some(entry) = self.cache.tracks.get(audio_path) {
+                if let Some(st) = file_mtime_size(audio_path) {
+                    if st != (entry.mtime_secs, entry.size) {
+                        fs::remove_file(&art_path).ok();
+                    }
+                }
+            }
+            if art_path.exists() {
+                return Ok(Some(art_path));
+            }
         }
 
         if let Some(data) = extract_album_art(audio_path)? {

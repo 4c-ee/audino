@@ -27,7 +27,7 @@ pub fn parse_lrc(path: &Path) -> Vec<LyricLine> {
         }
     }
 
-    lines.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+    lines.sort_by(|a, b| a.time.total_cmp(&b.time));
     lines
 }
 
