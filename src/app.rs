@@ -135,6 +135,11 @@ pub struct TickRenderCache {
 
 impl App {
     pub fn new(library_path: PathBuf) -> Self {
+        // mpv options passthrough from audino.conf: whitespace-separated key=value pairs
+        let mpv_options = crate::theme::config_value("mpv_options")
+            .map(|v| v.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>())
+            .unwrap_or_default();
+
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
         let placeholder_bytes = include_bytes!("../placeholder.png");
@@ -158,7 +163,7 @@ impl App {
         }
 
         let mut app = Self {
-            player: Player::new(),
+            player: Player::new(&mpv_options),
             metadata: MetadataProvider::new(),
             picker,
             current_album_art: None,

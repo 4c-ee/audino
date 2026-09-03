@@ -6,13 +6,28 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new() -> Self {
+    pub fn new(options: &[String]) -> Self {
         crate::log!("Initializing Player with libmpv");
         let mpv = Mpv::new().expect("Failed to initialize mpv");
-        
-        // Suppress cover art display as requested
+
+        // Apply user mpv options from the config file (e.g. audio-device, profile)
+        for option in options {
+            match option.split_once('=') {
+                Some((key, value)) => {
+                    let key = key.trim().strip_prefix("--").unwrap_or(key.trim());
+                    if let Err(e) = mpv.set_property(key, value.trim()) {
+                        crate::log!("mpv: failed to set option {}={}: {}", key, value, e);
+                    }
+                }
+                None => {
+                    crate::log!("mpv: ignoring malformed option {:?} (expected key=value)", option);
+                }
+            }
+        }
+
+        // Suppress cover art display as requested (applied after user options so it always wins)
         mpv.set_property("vo", "null").expect("Failed to set vo=null");
-        
+
         Self { mpv }
     }
 

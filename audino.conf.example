@@ -8,6 +8,11 @@
 # Can be overridden by the -p flag
 library_path = ~/Music
 
+# mpv options passthrough: whitespace-separated key=value pairs, applied to the
+# mpv instance at startup (any mpv option works, e.g. audio-device, profile)
+#mpv_options = audio-device=hw:0,0 volume=80
+#mpv_options = profile=audio-gain
+
 # Corner rounding - use rounded box corners instead of sharp corners
 corner_rounding = false
 
