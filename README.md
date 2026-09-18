@@ -24,9 +24,9 @@ Unfortunately even with the wondrous power of AI, releasing and packaging an app
 1. Clone the repo: `git clone git@github.com:4c-ee/audino.git`
 OR **download the source code from the releases for a stable version**, I'll try not to leave stuff completely unfinished for too long though lol
 
-2. Make sure you have cargo installed (usually supplied by the `rust` package) and your working directory is the place you extracted it
+2. Make sure you have `cargo` installed (usually supplied by the `rust` package) and your working directory is the place you extracted/cloned it (`cd audino`)
 3. Run `cargo build -r`
-4. Move the built binary from `target/release/audino` to `/usr/sbin/` (may need sudo) or wherever most of your commands are in
+4. Move the built binary from `./target/release/audino` to `/usr/bin`, `.local/bin`, or wherever most of your commands are in.
 5. Then run audino from anywhere!! It will default to ~/Music. You can change the default opening directory with `library_path` in `audino.conf`. See more in [audino.conf.example](audino.conf.example).
 
 To use it, run `audino` from your terminal. 
