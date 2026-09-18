@@ -9,6 +9,7 @@ use std::{io, thread, time::{Duration, Instant}, path::PathBuf};
 use anyhow::Result;
 use theme::Theme;
 use crossterm::{
+    Command,
     event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -74,6 +75,28 @@ fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+struct AlternateScrollMode(pub bool);
+
+impl Command for AlternateScrollMode {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if self.0 {
+            write!(f, "\x1b[?1007h")
+        } else {
+            write!(f, "\x1b[?1007l")
+        }
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
+}
+
 fn main() -> Result<()> {
     log!("Starting audino");
 
@@ -111,7 +134,7 @@ fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, AlternateScrollMode(false))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -123,7 +146,8 @@ fn main() -> Result<()> {
     disable_raw_mode().ok();
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen
+        LeaveAlternateScreen,
+        AlternateScrollMode(true)
     ).ok();
     terminal.show_cursor().ok();
 
