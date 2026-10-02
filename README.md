@@ -68,7 +68,8 @@ I don't claim to make this, the various LLMs I used did. I'm basically just a pr
 >Do you have the knowledge to read and understand this source code and/or the AUR PKGBUILD? I know it contains no viruses, but do you?
 >
 >If the answer is "no" to all, you should find out how to say yes to one or more of them, then download it :)
-#ethicalvibecoding
+
+\#ethicalvibecoding
 ---
 ```
 Copyright 2026 4c-ee
