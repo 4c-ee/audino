@@ -70,7 +70,7 @@ I don't claim to make this, the various LLMs I used did. I'm basically just a pr
 >If the answer is "no" to all, you should find out how to say yes to one or more of them, then download it :)
 
 \#ethicalvibecoding
----
+
 ```
 Copyright 2026 4c-ee
 
