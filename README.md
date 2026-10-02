@@ -18,18 +18,22 @@ It looks like this:
 <img src="assets/preview.png">
 <h6>uses terminal font, pictured is <a href="https://github.com/qwerasd205/PixelCode">pixel code</a></h6>
 
-## Installation/Usage
-Unfortunately even with the wondrous power of AI, releasing and packaging an application escapes me. So, in order to install this, you're gonna need to build it yourself:
+## Installation
+Unfortunately even with the wondrous power of AI, releasing and packaging an application escapes me. So, in order to install this, you're gonna need to build it yourself. 
 
-1. Clone the repo: `git clone git@github.com:4c-ee/audino.git`
+Nothing special is needed, just clone the repo, build it with cargo, and move the binary.
+
+Tutorial:
+1. Clone the repo from a terminal: `git clone git@github.com:4c-ee/audino.git`
 OR **download the source code from the releases for a stable version**, I'll try not to leave stuff completely unfinished for too long though lol
 
 2. Make sure you have `cargo` installed (usually supplied by the `rust` package) and your working directory is the place you extracted/cloned it (`cd audino`)
 3. Run `cargo build -r`
-4. Move the built binary from `./target/release/audino` to `/usr/bin`, `.local/bin`, or wherever most of your commands are in.
+4. Move the built binary from `./target/release/audino` to `/usr/bin` (may need sudo), `~/.local/bin`, or wherever most of your commands are in.
 5. Then run audino from anywhere!! It will default to ~/Music. You can change the default opening directory with `library_path` in `audino.conf`. See more in [audino.conf.example](audino.conf.example).
 
-To use it, run `audino` from your terminal. 
+## Usage
+To start the application, run `audino` from your terminal. 
 
 Press Tab to flip between the panels:
 1. Folder tree:
@@ -55,21 +59,19 @@ An example/default with all of the options can be found at [audino.conf.example]
 
 ---
 ## DISCLAIMER
-The majority of this code was generated with AI. A Rust ratatui project with a simple premise and terrible execution? Did you expect it to be _not_ vibecoded??
+The majority of this code was generated with AI. I did not make this, the AI did. I did the ideas, the feedback, testing, branding, etc. But they're the programmers. I did not touch a single line of code.
+(\#ethicalvibecoding /j)
 
-You're free to make your own, or use one of many alternatives out there.
-
-I don't claim to make this, the various LLMs I used did. I'm basically just a product manager atp. I did the branding, the publicity, etc. But they're the programmers.
-
+You're free to use one of the many alternatives out there. There are a million wonderful amazing projects built by real people which you can go support. I like this one though.
 
 > [!CAUTION]
 >Are you willing to trust an AI to run code on your computer? To trust me? 
 >
->Do you have the knowledge to read and understand this source code and/or the AUR PKGBUILD? I know it contains no viruses, but do you?
+>Do you have the knowledge to read and understand this source code? I know it contains no viruses, but do you?
 >
->If the answer is "no" to all, you should find out how to say yes to one or more of them, then download it :)
+>If the answer is "no" to all of those quesdtions, you should find out how to say yes to one or more of them, then download this software <3
 
-\#ethicalvibecoding
+
 
 ```
 Copyright 2026 4c-ee
